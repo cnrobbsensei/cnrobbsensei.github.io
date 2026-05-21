@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CodeNinjas - Robbinsville</title>
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    body {
+      background-color: #111827;
+      color: white;
+      overflow: hidden;
+    }
+
+    .container {
+      display: flex;
+      height: 100vh;
+      width: 100vw;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 240px;
+      background-color: #0f172a;
+      border-right: 3px solid #f97316;
+      display: flex;
+      flex-direction: column;
+      padding-top: 20px;
+    }
+
+    .logo {
+      text-align: center;
+      font-size: 1.5rem;
+      font-weight: bold;
+      color: #f97316;
+      margin-bottom: 30px;
+    }
+
+    .nav-button {
+      padding: 16px 24px;
+      cursor: pointer;
+      border: none;
+      background: none;
+      color: white;
+      text-align: left;
+      font-size: 1rem;
+      transition: 0.2s;
+      width: 100%;
+    }
+
+    .nav-button:hover,
+    .nav-button.active {
+      background-color: #1e293b;
+      border-left: 5px solid #f97316;
+    }
+
+    /* Main Content */
+    .main-content {
+      flex: 1;
+      background-color: #111827;
+      padding: 30px;
+      overflow-y: auto;
+    }
+
+    .page {
+      display: none;
+      height: 100%;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    /* Home Layout */
+    .home-layout {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 100%;
+      gap: 40px;
+    }
+
+    .home-text {
+      flex: 1;
+    }
+
+    .home-text h1 {
+      font-size: 3rem;
+      margin-bottom: 20px;
+      color: #f97316;
+    }
+
+    .home-text p {
+      font-size: 1.4rem;
+      line-height: 1.6;
+    }
+
+    .home-image {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .home-image img {
+      max-width: 100%;
+      max-height: 500px;
+      border-radius: 20px;
+      box-shadow: 0 0 25px rgba(0,0,0,0.5);
+    }
+
+    /* Ring Toss */
+    .subtabs {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 30px;
+    }
+
+    .subtab-button {
+      padding: 12px 20px;
+      background-color: #1e293b;
+      border: none;
+      color: white;
+      cursor: pointer;
+      border-radius: 10px;
+      transition: 0.2s;
+    }
+
+    .subtab-button.active {
+      background-color: #f97316;
+    }
+
+    .subtab-content {
+      display: none;
+    }
+
+    .subtab-content.active {
+      display: block;
+    }
+
+    select {
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      margin-bottom: 25px;
+      font-size: 1rem;
+    }
+
+    /* Leaderboard Grid */
+    .leaderboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+
+    .leaderboard-card {
+      background-color: #1e293b;
+      padding: 18px;
+      border-radius: 12px;
+      border-left: 5px solid #f97316;
+      font-size: 1.1rem;
+    }
+
+    /* Placeholder */
+    .placeholder {
+      margin-top: 20px;
+      padding: 25px;
+      background-color: #1e293b;
+      border-radius: 12px;
+      color: #cbd5e1;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="logo">CodeNinjas<br>Robbinsville</div>
+
+    <button class="nav-button active" onclick="showPage('home', this)">
+      Home
+    </button>
+
+    <button class="nav-button" onclick="showPage('ringtoss', this)">
+      Ring Toss
+    </button>
+
+    <button class="nav-button" onclick="showPage('riddle', this)">
+      Riddle of the Week
+    </button>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content">
+
+    <!-- HOME -->
+    <div id="home" class="page active">
+      <div class="home-layout">
+
+        <div class="home-text">
+          <h1>Hi Ninjas!</h1>
+
+          <p>
+            This is the official CodeNinjas - Robbinsville website
+            to track your leaderboards!
+          </p>
+        </div>
+
+        <div class="home-image">
+          <img src="home.png" alt="Home Image">
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RING TOSS -->
+    <div id="ringtoss" class="page">
+
+      <h1 style="margin-bottom: 20px; color:#f97316;">
+        Ring Toss
+      </h1>
+
+      <!-- Subtabs -->
+      <div class="subtabs">
+
+        <button class="subtab-button active"
+          onclick="showSubtab('viewLeaderboard', this)">
+          View Weekly Leaderboards
+        </button>
+
+        <button class="subtab-button"
+          onclick="showSubtab('addInput', this)">
+          Add Input
+        </button>
+
+      </div>
+
+      <!-- View Weekly Leaderboards -->
+      <div id="viewLeaderboard" class="subtab-content active">
+
+        <select id="weekSelect">
+          <option>Week 1</option>
+          <option>Week 2</option>
+          <option>Week 3</option>
+          <option>Week 4</option>
+        </select>
+
+        <div class="leaderboard-grid">
+
+          <div class="leaderboard-card">
+            Ninja Alex - 42 Points
+          </div>
+
+          <div class="leaderboard-card">
+            Ninja Sarah - 38 Points
+          </div>
+
+          <div class="leaderboard-card">
+            Ninja Ethan - 35 Points
+          </div>
+
+          <div class="leaderboard-card">
+            Ninja Mia - 31 Points
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Add Input -->
+      <div id="addInput" class="subtab-content">
+        <div class="placeholder">
+          Add Input section coming soon...
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIDDLE -->
+    <div id="riddle" class="page">
+      <h1 style="color:#f97316; margin-bottom:20px;">
+        Riddle of the Week
+      </h1>
+
+      <div class="placeholder">
+        Riddle section coming soon...
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+
+  // Main Pages
+  function showPage(pageId, buttonElement) {
+
+    // Hide pages
+    document.querySelectorAll('.page').forEach(page => {
+      page.classList.remove('active');
+    });
+
+    // Remove active buttons
+    document.querySelectorAll('.nav-button').forEach(btn => {
+      btn.classList.remove('active');
+    });
+
+    // Show selected page
+    document.getElementById(pageId).classList.add('active');
+
+    // Activate button
+    buttonElement.classList.add('active');
+  }
+
+  // Ring Toss Subtabs
+  function showSubtab(subtabId, buttonElement) {
+
+    document.querySelectorAll('.subtab-content').forEach(tab => {
+      tab.classList.remove('active');
+    });
+
+    document.querySelectorAll('.subtab-button').forEach(btn => {
+      btn.classList.remove('active');
+    });
+
+    document.getElementById(subtabId).classList.add('active');
+
+    buttonElement.classList.add('active');
+  }
+
+</script>
+
+</body>
+</html>
