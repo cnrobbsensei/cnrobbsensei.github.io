@@ -1,369 +1,326 @@
-const START_DATE = new Date('2026-05-13T00:00:00')
+import { useMemo } from "react";
+
+const START_DATE = new Date("2026-05-13T00:00:00");
 
 function getCurrentWeek() {
-  const today = new Date()
-  const diffTime = today.getTime() - START_DATE.getTime()
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
-  return Math.floor(diffDays / 7) + 1
+  const today = new Date();
+
+  const diffDays = Math.floor(
+    (today - START_DATE) / (1000 * 60 * 60 * 24)
+  );
+
+  return Math.floor(diffDays / 7) + 1;
 }
 
 function getWeekRange(weekNumber) {
-  const start = new Date(START_DATE)
-  start.setDate(start.getDate() + (weekNumber - 1) * 7)
+  const start = new Date(START_DATE);
 
-  const end = new Date(start)
-  end.setDate(end.getDate() + 6)
+  start.setDate(start.getDate() + (weekNumber - 1) * 7);
 
-  return {
-    start: start.toLocaleDateString(),
-    end: end.toLocaleDateString()
-  }
-}
+  const end = new Date(start);
 
-function generateWeeks(total = 52) {
-  return Array.from({ length: total }, (_, i) => {
-    const week = i + 1
-    const range = getWeekRange(week)
-
-    return {
-      week,
-      label: `Week ${week} — ${range.start} to ${range.end}`
-    }
-  })
-}
-
-const weeks = generateWeeks()
-const currentWeek = getCurrentWeek()
-
-// IMPORTANT:
-// This project MUST run inside a React + Tailwind environment.
-// Recommended setup:
-// 1. Vite + React
-// 2. Tailwind CSS installed/configured
-// 3. Paste this into App.jsx
-// 4. Ensure index.css includes Tailwind directives:
-//    @tailwind base;
-//    @tailwind components;
-//    @tailwind utilities;
-
-const START_DATE = new Date('2026-05-13T00:00:00')
-
-function getCurrentWeek() {
-  const today = new Date()
-  const diffTime = today.getTime() - START_DATE.getTime()
-  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
-  return Math.floor(diffDays / 7) + 1
-}
-
-function getWeekRange(weekNumber) {
-  const start = new Date(START_DATE)
-  start.setDate(start.getDate() + (weekNumber - 1) * 7)
-
-  const end = new Date(start)
-  end.setDate(end.getDate() + 6)
+  end.setDate(end.getDate() + 6);
 
   return {
     start: start.toLocaleDateString(),
-    end: end.toLocaleDateString()
-  }
+    end: end.toLocaleDateString(),
+  };
 }
-
-function generateWeeks(total = 52) {
-  return Array.from({ length: total }, (_, i) => {
-    const week = i + 1
-    const range = getWeekRange(week)
-
-    return {
-      week,
-      label: `Week ${week} — ${range.start} to ${range.end}`
-    }
-  })
-}
-
-const weeks = generateWeeks()
-const currentWeek = getCurrentWeek()
 
 export default function App() {
+  const currentWeek = getCurrentWeek();
+
+  const weeks = useMemo(() => {
+    return Array.from({ length: 52 }, (_, i) => {
+      const week = i + 1;
+      const range = getWeekRange(week);
+
+      return {
+        value: week,
+        label: `Week ${week} (${range.start} - ${range.end})`,
+      };
+    });
+  }, []);
+
+  const leaderboardData = [
+    ["🥇", "Alex", 1420, 9],
+    ["🥈", "Mia", 1300, 7],
+    ["🥉", "Ethan", 1180, 6],
+    ["4", "Sarah", 950, 5],
+    ["5", "Lucas", 890, 4],
+  ];
+
   return (
-    <div className="min-h-screen bg-black text-white flex overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-72 bg-white/10 backdrop-blur-2xl border-r border-cyan-400/20 p-6 flex flex-col justify-between">
-        <div>
-          <div className="mb-10">
-            <h1 className="text-3xl font-black bg-gradient-to-r from-green-400 via-cyan-400 to-pink-500 bg-clip-text text-transparent">
-              Code Ninjas
-            </h1>
-            <p className="text-gray-300 mt-2">Robbinsville Dashboard</p>
-          </div>
+    <div className="min-h-screen flex bg-black text-white">
+      
+      {/* SIDEBAR */}
+      <aside className="w-64 bg-[#0f172a] border-r-4 border-cyan-400 p-6">
+        <h1 className="text-3xl font-black text-cyan-400">
+          Code Ninjas
+        </h1>
 
-          <nav className="space-y-4">
-            <button className="w-full rounded-2xl bg-cyan-500/20 border border-cyan-400/30 px-5 py-4 text-left hover:scale-[1.02] transition-all duration-300 shadow-lg shadow-cyan-500/20">
-              Home
-            </button>
+        <p className="text-pink-400 mt-2">
+          Robbinsville Dashboard
+        </p>
 
-            <button className="w-full rounded-2xl bg-white/5 border border-pink-500/20 px-5 py-4 text-left hover:scale-[1.02] transition-all duration-300 hover:bg-pink-500/10">
-              Leaderboards
-            </button>
+        <nav className="mt-10 space-y-4">
+          <button className="w-full text-left px-4 py-3 rounded-xl bg-cyan-500 text-black font-bold hover:bg-cyan-400 transition">
+            Home
+          </button>
 
-            <button className="w-full rounded-2xl bg-white/5 border border-green-400/20 px-5 py-4 text-left hover:scale-[1.02] transition-all duration-300 hover:bg-green-400/10">
-              Riddle of the Week
-            </button>
-          </nav>
-        </div>
+          <button className="w-full text-left px-4 py-3 rounded-xl bg-[#1e293b] hover:bg-pink-500 transition">
+            Leaderboards
+          </button>
 
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-5 backdrop-blur-xl">
-          <p className="text-sm text-gray-300">Current Season</p>
-          <h2 className="text-2xl font-bold mt-1">Spring 2026</h2>
-        </div>
+          <button className="w-full text-left px-4 py-3 rounded-xl bg-[#1e293b] hover:bg-green-500 transition">
+            Riddle of the Week
+          </button>
+        </nav>
       </aside>
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-y-auto relative bg-[radial-gradient(circle_at_top_left,_rgba(0,255,200,0.15),transparent_35%),radial-gradient(circle_at_bottom_right,_rgba(255,0,200,0.15),transparent_35%),linear-gradient(to_bottom,_#020617,_#000000)]">
-        {/* Background Glow */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute top-20 left-20 w-96 h-96 bg-cyan-500/20 blur-3xl rounded-full" />
-          <div className="absolute bottom-10 right-20 w-96 h-96 bg-pink-500/20 blur-3xl rounded-full" />
-          <div className="absolute top-1/2 left-1/2 w-96 h-96 bg-green-500/10 blur-3xl rounded-full" />
-        </div>
+      {/* MAIN CONTENT */}
+      <main className="flex-1 p-10 overflow-y-auto">
 
-        <div className="relative z-10 p-10">
-          {/* HOME SECTION */}
-          <section className="min-h-screen flex items-center">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center w-full">
-              {/* Left Side */}
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-4 py-2 mb-6 backdrop-blur-xl">
-                  <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                  <span className="text-sm text-cyan-200">Official Student Dashboard</span>
-                </div>
+        {/* HOME SECTION */}
+        <section className="min-h-screen flex items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
 
-                <h1 className="text-6xl lg:text-7xl font-black leading-tight">
-                  Hi Ninjas!
-                </h1>
-
-                <p className="text-2xl text-gray-300 mt-6 max-w-2xl leading-relaxed">
-                  This is the official Code Ninjas – Robbinsville website to track your leaderboards!
-                </p>
-
-                <div className="grid grid-cols-2 gap-4 mt-10 max-w-xl">
-                  {[
-                    'Weekly competitions',
-                    'Ninja rankings',
-                    'Riddle challenges',
-                    'Student achievements'
-                  ].map((item) => (
-                    <div
-                      key={item}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-xl hover:bg-white/10 transition-all"
-                    >
-                      {item}
-                    </div>
-                  ))}
-                </div>
-
-                <button className="mt-10 rounded-2xl bg-gradient-to-r from-cyan-500 to-pink-500 px-8 py-4 text-lg font-bold shadow-2xl shadow-cyan-500/30 hover:scale-105 transition-all duration-300">
-                  View Leaderboards
-                </button>
-              </div>
-
-              {/* Right Side */}
-              <div className="relative flex justify-center items-center">
-                <div className="absolute w-96 h-96 rounded-full bg-cyan-500/20 blur-3xl" />
-
-                <div className="relative w-full max-w-xl space-y-6">
-                  <div className="rounded-3xl border border-cyan-400/20 bg-white/10 backdrop-blur-2xl p-6 shadow-2xl shadow-cyan-500/10">
-                    <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-xl font-bold">Live Rankings</h3>
-                      <div className="text-green-400 text-sm">● Active</div>
-                    </div>
-
-                    <div className="space-y-4">
-                      {[
-                        ['Alex', 1420],
-                        ['Mia', 1300],
-                        ['Ethan', 1180]
-                      ].map(([name, score], index) => (
-                        <div
-                          key={name}
-                          className="flex items-center justify-between rounded-2xl bg-black/30 p-4 border border-white/5"
-                        >
-                          <div className="flex items-center gap-4">
-                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-pink-500 flex items-center justify-center font-bold">
-                              {index + 1}
-                            </div>
-                            <span>{name}</span>
-                          </div>
-
-                          <span className="text-cyan-300 font-bold">{score}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <div className="rounded-3xl border border-pink-400/20 bg-white/10 backdrop-blur-2xl p-6">
-                      <p className="text-gray-400 text-sm">Weekly Entries</p>
-                      <h2 className="text-4xl font-black mt-2">284</h2>
-                    </div>
-
-                    <div className="rounded-3xl border border-green-400/20 bg-white/10 backdrop-blur-2xl p-6">
-                      <p className="text-gray-400 text-sm">Active Ninjas</p>
-                      <h2 className="text-4xl font-black mt-2">42</h2>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          {/* LEADERBOARD SECTION */}
-          <section className="mt-10 rounded-[2rem] border border-white/10 bg-white/5 p-8 backdrop-blur-2xl">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8">
-              <div>
-                <h2 className="text-4xl font-black">Leaderboards</h2>
-                <p className="text-gray-400 mt-2">Weekly ninja competition rankings</p>
-              </div>
-
-              <div className="flex gap-4">
-                <button className="rounded-2xl bg-cyan-500/20 border border-cyan-400/30 px-5 py-3">
-                  Weekly Leaderboard
-                </button>
-
-                <button className="rounded-2xl bg-white/5 border border-white/10 px-5 py-3">
-                  Enter Scores
-                </button>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center mb-8">
-              <div>
-                <p className="text-gray-400 mb-2">Select Week</p>
-
-                <select className="bg-black/40 border border-cyan-400/20 rounded-2xl px-5 py-3 outline-none backdrop-blur-xl">
-                  {weeks.map((week) => (
-                    <option key={week.week}>
-                      {week.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="rounded-2xl border border-green-400/20 bg-green-400/10 px-5 py-4">
-                <p className="text-sm text-gray-300">Current Week</p>
-                <h3 className="text-2xl font-black">Week {currentWeek}</h3>
-              </div>
-            </div>
-
-            <div className="overflow-hidden rounded-3xl border border-white/10">
-              <table className="w-full">
-                <thead className="bg-white/10 backdrop-blur-xl text-left">
-                  <tr>
-                    <th className="p-5">Rank</th>
-                    <th className="p-5">Ninja Name</th>
-                    <th className="p-5">Total Points</th>
-                    <th className="p-5">Entries</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {[
-                    ['🥇', 'Alex', '1420', '9'],
-                    ['🥈', 'Mia', '1300', '7'],
-                    ['🥉', 'Ethan', '1180', '6'],
-                    ['4', 'Sarah', '950', '5'],
-                    ['5', 'Lucas', '890', '4']
-                  ].map((row, index) => (
-                    <tr
-                      key={index}
-                      className="border-t border-white/5 hover:bg-white/5 transition-all"
-                    >
-                      <td className="p-5 font-bold">{row[0]}</td>
-                      <td className="p-5">{row[1]}</td>
-                      <td className="p-5 text-cyan-300 font-bold">{row[2]}</td>
-                      <td className="p-5">{row[3]}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          {/* RIDDLE SECTION */}
-          <section className="mt-10 rounded-[2rem] border border-white/10 bg-white/5 p-8 backdrop-blur-2xl mb-10">
-            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8">
-              <div>
-                <h2 className="text-4xl font-black">Riddle of the Week</h2>
-                <p className="text-gray-400 mt-2">Weekly coding brain teasers</p>
-              </div>
-
-              <select className="bg-black/40 border border-pink-400/20 rounded-2xl px-5 py-3 outline-none backdrop-blur-xl">
-                {weeks.map((week) => (
-                  <option key={week.week}>
-                    {week.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="rounded-[2rem] border border-pink-400/20 bg-gradient-to-br from-pink-500/10 to-cyan-500/10 p-10 backdrop-blur-2xl">
-              <p className="text-pink-300 text-sm uppercase tracking-[0.2em] mb-4">
-                Featured Riddle
+            {/* LEFT */}
+            <div>
+              <p className="text-green-400 font-bold mb-4 uppercase tracking-widest">
+                Official Student Dashboard
               </p>
 
-              <h3 className="text-4xl font-black leading-relaxed max-w-4xl">
-                I can store thousands of memories, but I forget everything when power disappears. What am I?
-              </h3>
-            </div>
+              <h1 className="text-6xl font-black leading-tight">
+                Hi Ninjas!
+              </h1>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-10">
-              {/* Answers */}
-              <div className="space-y-5">
-                <h4 className="text-2xl font-bold">Student Answers</h4>
+              <p className="text-2xl text-gray-300 mt-6 leading-relaxed">
+                This is the official Code Ninjas – Robbinsville
+                website to track your leaderboards!
+              </p>
 
+              <div className="grid grid-cols-2 gap-4 mt-10">
                 {[
-                  ['Emma', 'RAM memory', '2 minutes ago'],
-                  ['Liam', 'Computer RAM', '14 minutes ago'],
-                  ['Sophia', 'Temporary memory', '1 hour ago']
+                  "Weekly competitions",
+                  "Ninja rankings",
+                  "Riddle challenges",
+                  "Student achievements",
                 ].map((item) => (
                   <div
-                    key={item[0]}
-                    className="rounded-3xl border border-white/10 bg-black/20 p-5 hover:bg-white/5 transition-all"
+                    key={item}
+                    className="bg-[#111827] border border-cyan-400 rounded-xl p-4 hover:border-pink-400 transition"
                   >
-                    <div className="flex items-center justify-between mb-3">
-                      <h5 className="font-bold text-lg">{item[0]}</h5>
-                      <span className="text-sm text-gray-400">{item[2]}</span>
-                    </div>
-
-                    <p className="text-gray-300">{item[1]}</p>
+                    {item}
                   </div>
                 ))}
               </div>
 
-              {/* Submission Form */}
-              <div className="rounded-[2rem] border border-cyan-400/20 bg-white/5 p-8 backdrop-blur-2xl">
-                <h4 className="text-2xl font-bold mb-6">Submit Your Answer</h4>
+              <button className="mt-10 bg-gradient-to-r from-cyan-400 to-pink-500 text-black font-bold px-8 py-4 rounded-xl hover:scale-105 transition">
+                View Leaderboards
+              </button>
+            </div>
 
-                <div className="space-y-5">
-                  <input
-                    placeholder="Student Name"
-                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-5 py-4 outline-none focus:border-cyan-400/50"
-                  />
+            {/* RIGHT */}
+            <div className="flex justify-center">
+              <div className="bg-[#111827] border-2 border-cyan-400 rounded-3xl p-8 w-full max-w-lg">
 
-                  <textarea
-                    rows="5"
-                    placeholder="Enter your answer..."
-                    className="w-full rounded-2xl bg-black/30 border border-white/10 px-5 py-4 outline-none focus:border-pink-400/50 resize-none"
-                  />
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl font-bold">
+                    Live Rankings
+                  </h2>
 
-                  <button className="w-full rounded-2xl bg-gradient-to-r from-green-400 to-cyan-500 py-4 font-bold text-black hover:scale-[1.02] transition-all duration-300 shadow-2xl shadow-green-400/20">
-                    Submit Answer
-                  </button>
+                  <span className="text-green-400 font-bold">
+                    ● ACTIVE
+                  </span>
                 </div>
+
+                <div className="space-y-4">
+                  {leaderboardData.slice(0, 3).map((row, index) => (
+                    <div
+                      key={index}
+                      className="flex justify-between items-center bg-black rounded-xl p-4 border border-gray-700"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-full bg-cyan-400 text-black font-bold flex items-center justify-center">
+                          {index + 1}
+                        </div>
+
+                        <span>{row[1]}</span>
+                      </div>
+
+                      <span className="text-cyan-400 font-bold">
+                        {row[2]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
               </div>
             </div>
-          </section>
-        </div>
+
+          </div>
+        </section>
+
+        {/* LEADERBOARD SECTION */}
+        <section className="mt-10">
+          <h2 className="text-4xl font-black mb-2">
+            Leaderboards
+          </h2>
+
+          <p className="text-gray-400 mb-8">
+            Weekly ninja competition rankings
+          </p>
+
+          <div className="flex flex-wrap gap-4 mb-8">
+            <button className="bg-cyan-400 text-black px-5 py-3 rounded-xl font-bold">
+              Weekly Leaderboard
+            </button>
+
+            <button className="bg-[#1e293b] px-5 py-3 rounded-xl hover:bg-pink-500 transition">
+              Enter Scores
+            </button>
+          </div>
+
+          <div className="mb-8">
+            <p className="mb-2 text-gray-400">
+              Select Week
+            </p>
+
+            <select className="bg-[#111827] border border-cyan-400 rounded-xl px-5 py-3">
+              {weeks.map((week) => (
+                <option key={week.value}>
+                  {week.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="bg-[#111827] border border-cyan-400 rounded-2xl overflow-hidden">
+
+            {/* HEADER */}
+            <div className="grid grid-cols-4 bg-cyan-400 text-black font-black p-4">
+              <div>Rank</div>
+              <div>Ninja Name</div>
+              <div>Total Points</div>
+              <div>Entries</div>
+            </div>
+
+            {/* ROWS */}
+            {leaderboardData.map((row, index) => (
+              <div
+                key={index}
+                className="grid grid-cols-4 p-4 border-t border-gray-800 hover:bg-[#1e293b] transition"
+              >
+                <div>{row[0]}</div>
+                <div>{row[1]}</div>
+                <div className="text-cyan-400 font-bold">
+                  {row[2]}
+                </div>
+                <div>{row[3]}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 text-green-400 font-bold">
+            Current Week: Week {currentWeek}
+          </div>
+        </section>
+
+        {/* RIDDLE SECTION */}
+        <section className="mt-20 mb-20">
+          <h2 className="text-4xl font-black mb-2">
+            Riddle of the Week
+          </h2>
+
+          <p className="text-gray-400 mb-8">
+            Weekly coding brain teasers
+          </p>
+
+          <div className="mb-8">
+            <select className="bg-[#111827] border border-pink-400 rounded-xl px-5 py-3">
+              {weeks.map((week) => (
+                <option key={week.value}>
+                  {week.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* RIDDLE CARD */}
+          <div className="bg-[#111827] border-2 border-pink-400 rounded-3xl p-10">
+            <p className="text-pink-400 uppercase font-bold tracking-widest mb-4">
+              Featured Riddle
+            </p>
+
+            <h3 className="text-3xl font-black leading-relaxed">
+              I can store thousands of memories, but I forget
+              everything when power disappears. What am I?
+            </h3>
+          </div>
+
+          {/* ANSWERS */}
+          <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-8">
+
+            {/* LEFT */}
+            <div>
+              <h4 className="text-2xl font-bold mb-6">
+                Student Answers
+              </h4>
+
+              {[
+                ["Emma", "RAM memory", "2 minutes ago"],
+                ["Liam", "Computer RAM", "14 minutes ago"],
+                ["Sophia", "Temporary memory", "1 hour ago"],
+              ].map((item, index) => (
+                <div
+                  key={index}
+                  className="bg-[#111827] border border-green-400 rounded-2xl p-5 mb-4"
+                >
+                  <div className="flex justify-between mb-2">
+                    <h5 className="font-bold">
+                      {item[0]}
+                    </h5>
+
+                    <span className="text-gray-400 text-sm">
+                      {item[2]}
+                    </span>
+                  </div>
+
+                  <p>{item[1]}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* RIGHT */}
+            <div className="bg-[#111827] border border-cyan-400 rounded-3xl p-8">
+              <h4 className="text-2xl font-bold mb-6">
+                Submit Your Answer
+              </h4>
+
+              <div className="space-y-5">
+                <input
+                  type="text"
+                  placeholder="Student Name"
+                  className="w-full bg-black border border-gray-700 rounded-xl px-5 py-4"
+                />
+
+                <textarea
+                  rows="5"
+                  placeholder="Enter your answer..."
+                  className="w-full bg-black border border-gray-700 rounded-xl px-5 py-4 resize-none"
+                />
+
+                <button className="w-full bg-gradient-to-r from-green-400 to-cyan-400 text-black font-bold py-4 rounded-xl hover:scale-[1.02] transition">
+                  Submit Answer
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
       </main>
     </div>
-  )
+  );
 }
