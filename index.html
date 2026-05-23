@@ -1,326 +1,821 @@
-import { useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 
-const START_DATE = new Date("2026-05-13T00:00:00");
+// ─── WEEK UTILS ────────────────────────────────────────────────────────────
+const WEEK_START = new Date("2026-05-13T00:00:00");
 
 function getCurrentWeek() {
-  const today = new Date();
-
-  const diffDays = Math.floor(
-    (today - START_DATE) / (1000 * 60 * 60 * 24)
-  );
-
-  return Math.floor(diffDays / 7) + 1;
+  const now = new Date();
+  const diff = now - WEEK_START;
+  if (diff < 0) return 1;
+  return Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1;
 }
 
-function getWeekRange(weekNumber) {
-  const start = new Date(START_DATE);
-
-  start.setDate(start.getDate() + (weekNumber - 1) * 7);
-
-  const end = new Date(start);
-
-  end.setDate(end.getDate() + 6);
-
-  return {
-    start: start.toLocaleDateString(),
-    end: end.toLocaleDateString(),
-  };
+function getWeekLabel(n) {
+  const start = new Date(WEEK_START.getTime() + (n - 1) * 7 * 24 * 60 * 60 * 1000);
+  const end = new Date(start.getTime() + 6 * 24 * 60 * 60 * 1000);
+  return `Week ${n} (${start.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${end.toLocaleDateString("en-US", { month: "short", day: "numeric" })})`;
 }
 
-export default function App() {
-  const currentWeek = getCurrentWeek();
+// ─── MOCK DATA ──────────────────────────────────────────────────────────────
+const MOCK_SCORES = {
+  1: [
+    { id: 1, name: "ShadowByte", points: 980, ts: Date.now() - 9e5 },
+    { id: 2, name: "NeonKatana", points: 860, ts: Date.now() - 8e5 },
+    { id: 3, name: "PixelStorm", points: 940, ts: Date.now() - 7e5 },
+    { id: 4, name: "ShadowByte", points: 750, ts: Date.now() - 6e5 },
+    { id: 5, name: "ZeroCode", points: 1020, ts: Date.now() - 5e5 },
+    { id: 6, name: "NeonKatana", points: 910, ts: Date.now() - 4e5 },
+    { id: 7, name: "PixelStorm", points: 870, ts: Date.now() - 3e5 },
+    { id: 8, name: "ZeroCode", points: 850, ts: Date.now() - 2e5 },
+    { id: 9, name: "ShadowByte", points: 905, ts: Date.now() - 1e5 },
+    { id: 10, name: "ByteWizard", points: 770, ts: Date.now() - 5e4 },
+    { id: 11, name: "ZeroCode", points: 990, ts: Date.now() - 3e4 },
+    { id: 12, name: "ByteWizard", points: 820, ts: Date.now() - 1e4 },
+  ],
+};
 
-  const weeks = useMemo(() => {
-    return Array.from({ length: 52 }, (_, i) => {
-      const week = i + 1;
-      const range = getWeekRange(week);
+const MOCK_RIDDLES = {
+  1: {
+    text: "I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?",
+    answers: [
+      { name: "NeonKatana", answer: "An echo!", ts: Date.now() - 8e5 },
+      { name: "PixelStorm", answer: "The wind itself?", ts: Date.now() - 6e5 },
+      { name: "ZeroCode", answer: "An echo — sound bouncing back!", ts: Date.now() - 4e5 },
+    ],
+  },
+};
 
-      return {
-        value: week,
-        label: `Week ${week} (${range.start} - ${range.end})`,
-      };
-    });
+// ─── STORAGE HELPERS ────────────────────────────────────────────────────────
+function loadScores() {
+  try {
+    const raw = localStorage.getItem("cn_scores");
+    return raw ? JSON.parse(raw) : MOCK_SCORES;
+  } catch {
+    return MOCK_SCORES;
+  }
+}
+
+function saveScores(data) {
+  localStorage.setItem("cn_scores", JSON.stringify(data));
+}
+
+function loadRiddles() {
+  try {
+    const raw = localStorage.getItem("cn_riddles");
+    return raw ? JSON.parse(raw) : MOCK_RIDDLES;
+  } catch {
+    return MOCK_RIDDLES;
+  }
+}
+
+function saveRiddles(data) {
+  localStorage.setItem("cn_riddles", JSON.stringify(data));
+}
+
+// ─── LEADERBOARD CALC ──────────────────────────────────────────────────────
+function calcLeaderboard(entries = []) {
+  const map = {};
+  entries.forEach((e) => {
+    if (!map[e.name]) map[e.name] = [];
+    map[e.name].push(e.points);
+  });
+  return Object.entries(map)
+    .map(([name, pts]) => {
+      const sorted = [...pts].sort((a, b) => b - a);
+      const top3 = sorted.slice(0, 3);
+      return { name, total: top3.reduce((s, v) => s + v, 0), entries: pts.length, top3 };
+    })
+    .sort((a, b) => b.total - a.total);
+}
+
+// ─── PARTICLES (canvas) ────────────────────────────────────────────────────
+function Particles() {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    canvas.width = canvas.offsetWidth;
+    canvas.height = canvas.offsetHeight;
+    const particles = Array.from({ length: 60 }, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: Math.random() * 2 + 0.5,
+      dx: (Math.random() - 0.5) * 0.4,
+      dy: (Math.random() - 0.5) * 0.4,
+      color: ["#39ff14", "#00cfff", "#ff2d78"][Math.floor(Math.random() * 3)],
+      alpha: Math.random() * 0.6 + 0.2,
+    }));
+    let raf;
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      particles.forEach((p) => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = p.color;
+        ctx.fill();
+        p.x += p.dx;
+        p.y += p.dy;
+        if (p.x < 0 || p.x > canvas.width) p.dx *= -1;
+        if (p.y < 0 || p.y > canvas.height) p.dy *= -1;
+      });
+      ctx.globalAlpha = 1;
+      raf = requestAnimationFrame(draw);
+    }
+    draw();
+    return () => cancelAnimationFrame(raf);
   }, []);
+  return <canvas ref={canvasRef} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }} />;
+}
 
-  const leaderboardData = [
-    ["🥇", "Alex", 1420, 9],
-    ["🥈", "Mia", 1300, 7],
-    ["🥉", "Ethan", 1180, 6],
-    ["4", "Sarah", 950, 5],
-    ["5", "Lucas", 890, 4],
-  ];
+// ─── FLOATING CODE LINES ───────────────────────────────────────────────────
+const CODE_LINES = [
+  "const ninja = new Coder();",
+  "while(learning) { level++; }",
+  "function achieve(goal) {",
+  "  return skill * effort;",
+  "}",
+  "if (rank === 1) celebrate();",
+  "ninja.train(['python','js']);",
+  "const points = score * combo;",
+  "export default Ninja;",
+];
 
+function FloatingCode() {
   return (
-    <div className="min-h-screen flex bg-black text-white">
-      
-      {/* SIDEBAR */}
-      <aside className="w-64 bg-[#0f172a] border-r-4 border-cyan-400 p-6">
-        <h1 className="text-3xl font-black text-cyan-400">
-          Code Ninjas
-        </h1>
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none" }}>
+      {CODE_LINES.map((line, i) => (
+        <div
+          key={i}
+          style={{
+            position: "absolute",
+            left: `${5 + Math.random() * 60}%`,
+            top: `${(i / CODE_LINES.length) * 100}%`,
+            fontFamily: "'Fira Code', monospace",
+            fontSize: "11px",
+            color: i % 3 === 0 ? "#39ff14" : i % 3 === 1 ? "#00cfff" : "#ff2d78",
+            opacity: 0.18 + (i % 4) * 0.07,
+            animation: `floatUp ${8 + i * 0.7}s linear infinite`,
+            animationDelay: `${i * 0.8}s`,
+            whiteSpace: "nowrap",
+            textShadow: `0 0 8px currentColor`,
+          }}
+        >
+          {line}
+        </div>
+      ))}
+    </div>
+  );
+}
 
-        <p className="text-pink-400 mt-2">
-          Robbinsville Dashboard
-        </p>
+// ─── GLASS CARD ────────────────────────────────────────────────────────────
+function Glass({ children, style = {}, className = "", onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      className={className}
+      style={{
+        background: "rgba(255,255,255,0.06)",
+        backdropFilter: "blur(18px)",
+        WebkitBackdropFilter: "blur(18px)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: "16px",
+        boxShadow: "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08)",
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
-        <nav className="mt-10 space-y-4">
-          <button className="w-full text-left px-4 py-3 rounded-xl bg-cyan-500 text-black font-bold hover:bg-cyan-400 transition">
-            Home
-          </button>
+// ─── RANK BADGE ────────────────────────────────────────────────────────────
+function RankBadge({ rank }) {
+  const configs = {
+    1: { bg: "linear-gradient(135deg,#ffd700,#ff8c00)", shadow: "#ffd700", emoji: "👑" },
+    2: { bg: "linear-gradient(135deg,#c0c0c0,#808080)", shadow: "#c0c0c0", emoji: "🥈" },
+    3: { bg: "linear-gradient(135deg,#cd7f32,#8b4513)", shadow: "#cd7f32", emoji: "🥉" },
+  };
+  const c = configs[rank] || { bg: "rgba(255,255,255,0.1)", shadow: "transparent", emoji: null };
+  return (
+    <div
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: "50%",
+        background: c.bg,
+        boxShadow: rank <= 3 ? `0 0 14px ${c.shadow}88` : "none",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontWeight: 700,
+        fontSize: rank <= 3 ? "15px" : "13px",
+        color: rank <= 3 ? "#000" : "#aaa",
+        flexShrink: 0,
+      }}
+    >
+      {c.emoji || `#${rank}`}
+    </div>
+  );
+}
 
-          <button className="w-full text-left px-4 py-3 rounded-xl bg-[#1e293b] hover:bg-pink-500 transition">
-            Leaderboards
-          </button>
+// ─── TOAST ─────────────────────────────────────────────────────────────────
+function Toast({ msg, onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 3000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div
+      style={{
+        position: "fixed",
+        bottom: 32,
+        right: 32,
+        background: "linear-gradient(135deg,rgba(57,255,20,0.2),rgba(0,207,255,0.2))",
+        border: "1px solid #39ff14",
+        borderRadius: 12,
+        padding: "14px 24px",
+        color: "#39ff14",
+        fontFamily: "'Fira Code', monospace",
+        fontWeight: 600,
+        fontSize: 14,
+        boxShadow: "0 0 24px #39ff1466",
+        zIndex: 9999,
+        animation: "slideIn 0.3s ease",
+      }}
+    >
+      ✅ {msg}
+    </div>
+  );
+}
 
-          <button className="w-full text-left px-4 py-3 rounded-xl bg-[#1e293b] hover:bg-green-500 transition">
-            Riddle of the Week
-          </button>
-        </nav>
-      </aside>
-
-      {/* MAIN CONTENT */}
-      <main className="flex-1 p-10 overflow-y-auto">
-
-        {/* HOME SECTION */}
-        <section className="min-h-screen flex items-center">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center w-full">
-
-            {/* LEFT */}
-            <div>
-              <p className="text-green-400 font-bold mb-4 uppercase tracking-widest">
-                Official Student Dashboard
-              </p>
-
-              <h1 className="text-6xl font-black leading-tight">
-                Hi Ninjas!
-              </h1>
-
-              <p className="text-2xl text-gray-300 mt-6 leading-relaxed">
-                This is the official Code Ninjas – Robbinsville
-                website to track your leaderboards!
-              </p>
-
-              <div className="grid grid-cols-2 gap-4 mt-10">
-                {[
-                  "Weekly competitions",
-                  "Ninja rankings",
-                  "Riddle challenges",
-                  "Student achievements",
-                ].map((item) => (
-                  <div
-                    key={item}
-                    className="bg-[#111827] border border-cyan-400 rounded-xl p-4 hover:border-pink-400 transition"
-                  >
-                    {item}
-                  </div>
-                ))}
-              </div>
-
-              <button className="mt-10 bg-gradient-to-r from-cyan-400 to-pink-500 text-black font-bold px-8 py-4 rounded-xl hover:scale-105 transition">
-                View Leaderboards
-              </button>
-            </div>
-
-            {/* RIGHT */}
-            <div className="flex justify-center">
-              <div className="bg-[#111827] border-2 border-cyan-400 rounded-3xl p-8 w-full max-w-lg">
-
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-bold">
-                    Live Rankings
-                  </h2>
-
-                  <span className="text-green-400 font-bold">
-                    ● ACTIVE
-                  </span>
-                </div>
-
-                <div className="space-y-4">
-                  {leaderboardData.slice(0, 3).map((row, index) => (
-                    <div
-                      key={index}
-                      className="flex justify-between items-center bg-black rounded-xl p-4 border border-gray-700"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 rounded-full bg-cyan-400 text-black font-bold flex items-center justify-center">
-                          {index + 1}
-                        </div>
-
-                        <span>{row[1]}</span>
-                      </div>
-
-                      <span className="text-cyan-400 font-bold">
-                        {row[2]}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-
-              </div>
-            </div>
-
+// ─── HOME TAB ──────────────────────────────────────────────────────────────
+function HomeTab({ onNav }) {
+  return (
+    <div style={{ position: "relative", minHeight: "100vh", display: "flex", alignItems: "center", overflow: "hidden" }}>
+      <Particles />
+      <FloatingCode />
+      <div style={{ position: "relative", zIndex: 2, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 48, padding: "48px 48px 48px 48px", width: "100%", alignItems: "center" }}>
+        {/* LEFT */}
+        <div style={{ animation: "fadeSlideLeft 0.7s ease both" }}>
+          <div style={{ display: "inline-block", background: "rgba(57,255,20,0.12)", border: "1px solid #39ff1455", borderRadius: 99, padding: "6px 16px", marginBottom: 24 }}>
+            <span style={{ fontFamily: "'Fira Code', monospace", fontSize: 12, color: "#39ff14", letterSpacing: 2 }}>⚡ LIVE COMPETITION DASHBOARD</span>
           </div>
-        </section>
-
-        {/* LEADERBOARD SECTION */}
-        <section className="mt-10">
-          <h2 className="text-4xl font-black mb-2">
-            Leaderboards
-          </h2>
-
-          <p className="text-gray-400 mb-8">
-            Weekly ninja competition rankings
+          <h1 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: "clamp(28px,3.5vw,52px)", fontWeight: 900, lineHeight: 1.15, marginBottom: 16, background: "linear-gradient(135deg,#fff 0%,#00cfff 50%,#39ff14 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            Hi Ninjas! 👋
+          </h1>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontSize: "clamp(14px,1.5vw,20px)", color: "rgba(255,255,255,0.7)", marginBottom: 32, lineHeight: 1.6 }}>
+            This is the official <span style={{ color: "#39ff14", fontWeight: 700 }}>Code Ninjas – Robbinsville</span> website to track your leaderboards!
           </p>
-
-          <div className="flex flex-wrap gap-4 mb-8">
-            <button className="bg-cyan-400 text-black px-5 py-3 rounded-xl font-bold">
-              Weekly Leaderboard
-            </button>
-
-            <button className="bg-[#1e293b] px-5 py-3 rounded-xl hover:bg-pink-500 transition">
-              Enter Scores
-            </button>
-          </div>
-
-          <div className="mb-8">
-            <p className="mb-2 text-gray-400">
-              Select Week
-            </p>
-
-            <select className="bg-[#111827] border border-cyan-400 rounded-xl px-5 py-3">
-              {weeks.map((week) => (
-                <option key={week.value}>
-                  {week.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="bg-[#111827] border border-cyan-400 rounded-2xl overflow-hidden">
-
-            {/* HEADER */}
-            <div className="grid grid-cols-4 bg-cyan-400 text-black font-black p-4">
-              <div>Rank</div>
-              <div>Ninja Name</div>
-              <div>Total Points</div>
-              <div>Entries</div>
-            </div>
-
-            {/* ROWS */}
-            {leaderboardData.map((row, index) => (
-              <div
-                key={index}
-                className="grid grid-cols-4 p-4 border-t border-gray-800 hover:bg-[#1e293b] transition"
-              >
-                <div>{row[0]}</div>
-                <div>{row[1]}</div>
-                <div className="text-cyan-400 font-bold">
-                  {row[2]}
-                </div>
-                <div>{row[3]}</div>
-              </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 40 }}>
+            {["🏆 Weekly competitions", "🎖️ Ninja rankings", "🧩 Riddle challenges", "⭐ Student achievements"].map((item, i) => (
+              <Glass key={i} style={{ padding: "12px 16px" }}>
+                <span style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.8)" }}>{item}</span>
+              </Glass>
             ))}
           </div>
-
-          <div className="mt-6 text-green-400 font-bold">
-            Current Week: Week {currentWeek}
+          <button
+            onClick={() => onNav("leaderboards")}
+            style={{
+              fontFamily: "'Orbitron', sans-serif",
+              fontWeight: 700,
+              fontSize: 14,
+              letterSpacing: 1.5,
+              padding: "16px 40px",
+              borderRadius: 99,
+              border: "none",
+              cursor: "pointer",
+              background: "linear-gradient(135deg,#39ff14,#00cfff)",
+              color: "#000",
+              boxShadow: "0 0 30px #39ff1455, 0 0 60px #00cfff33",
+              transition: "transform 0.2s, box-shadow 0.2s",
+              animation: "pulse 2s ease-in-out infinite",
+            }}
+            onMouseEnter={e => { e.target.style.transform = "scale(1.06)"; e.target.style.boxShadow = "0 0 50px #39ff1488, 0 0 80px #00cfff55"; }}
+            onMouseLeave={e => { e.target.style.transform = "scale(1)"; e.target.style.boxShadow = "0 0 30px #39ff1455, 0 0 60px #00cfff33"; }}
+          >
+            VIEW LEADERBOARDS →
+          </button>
+        </div>
+        {/* RIGHT */}
+        <div style={{ position: "relative", animation: "fadeSlideRight 0.7s ease both" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {[
+              { icon: "🥷", label: "Active Ninjas", val: "24", color: "#39ff14" },
+              { icon: "🏅", label: "This Week's #1", val: "ZeroCode", color: "#ffd700" },
+              { icon: "💻", label: "Total Entries", val: "147", color: "#00cfff" },
+              { icon: "🔥", label: "Top Score", val: "1,020 pts", color: "#ff2d78" },
+            ].map((card, i) => (
+              <Glass
+                key={i}
+                style={{
+                  padding: "24px 20px",
+                  borderColor: `${card.color}33`,
+                  boxShadow: `0 8px 32px rgba(0,0,0,0.4), 0 0 20px ${card.color}22`,
+                  animation: `fadeUp 0.5s ease both ${0.1 + i * 0.1}s`,
+                  transition: "transform 0.2s, box-shadow 0.2s",
+                  cursor: "default",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-4px)"; e.currentTarget.style.boxShadow = `0 16px 48px rgba(0,0,0,0.5), 0 0 30px ${card.color}44`; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.boxShadow = `0 8px 32px rgba(0,0,0,0.4), 0 0 20px ${card.color}22`; }}
+              >
+                <div style={{ fontSize: 32, marginBottom: 8 }}>{card.icon}</div>
+                <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 4, letterSpacing: 1 }}>{card.label.toUpperCase()}</div>
+                <div style={{ fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 20, color: card.color, textShadow: `0 0 12px ${card.color}88` }}>{card.val}</div>
+              </Glass>
+            ))}
           </div>
-        </section>
-
-        {/* RIDDLE SECTION */}
-        <section className="mt-20 mb-20">
-          <h2 className="text-4xl font-black mb-2">
-            Riddle of the Week
-          </h2>
-
-          <p className="text-gray-400 mb-8">
-            Weekly coding brain teasers
-          </p>
-
-          <div className="mb-8">
-            <select className="bg-[#111827] border border-pink-400 rounded-xl px-5 py-3">
-              {weeks.map((week) => (
-                <option key={week.value}>
-                  {week.label}
-                </option>
-              ))}
-            </select>
+          {/* Ninja SVG */}
+          <div style={{ display: "flex", justifyContent: "center", marginTop: 20 }}>
+            <svg width="120" height="120" viewBox="0 0 120 120" style={{ filter: "drop-shadow(0 0 16px #39ff14aa)" }}>
+              <circle cx="60" cy="40" r="22" fill="none" stroke="#39ff14" strokeWidth="2" opacity="0.8" />
+              <ellipse cx="60" cy="42" rx="14" ry="16" fill="rgba(57,255,20,0.1)" stroke="#39ff14" strokeWidth="1.5" />
+              <path d="M46 38 Q60 28 74 38" fill="none" stroke="#00cfff" strokeWidth="2" />
+              <rect x="48" y="64" width="24" height="28" rx="4" fill="rgba(57,255,20,0.08)" stroke="#39ff14" strokeWidth="1.5" />
+              <line x1="60" y1="92" x2="52" y2="115" stroke="#39ff14" strokeWidth="2" />
+              <line x1="60" y1="92" x2="68" y2="115" stroke="#39ff14" strokeWidth="2" />
+              <line x1="48" y1="70" x2="36" y2="84" stroke="#00cfff" strokeWidth="2" />
+              <line x1="72" y1="70" x2="84" y2="84" stroke="#00cfff" strokeWidth="2" />
+              <circle cx="53" cy="41" r="2.5" fill="#00cfff" />
+              <circle cx="67" cy="41" r="2.5" fill="#00cfff" />
+            </svg>
           </div>
-
-          {/* RIDDLE CARD */}
-          <div className="bg-[#111827] border-2 border-pink-400 rounded-3xl p-10">
-            <p className="text-pink-400 uppercase font-bold tracking-widest mb-4">
-              Featured Riddle
-            </p>
-
-            <h3 className="text-3xl font-black leading-relaxed">
-              I can store thousands of memories, but I forget
-              everything when power disappears. What am I?
-            </h3>
-          </div>
-
-          {/* ANSWERS */}
-          <div className="mt-10 grid grid-cols-1 lg:grid-cols-2 gap-8">
-
-            {/* LEFT */}
-            <div>
-              <h4 className="text-2xl font-bold mb-6">
-                Student Answers
-              </h4>
-
-              {[
-                ["Emma", "RAM memory", "2 minutes ago"],
-                ["Liam", "Computer RAM", "14 minutes ago"],
-                ["Sophia", "Temporary memory", "1 hour ago"],
-              ].map((item, index) => (
-                <div
-                  key={index}
-                  className="bg-[#111827] border border-green-400 rounded-2xl p-5 mb-4"
-                >
-                  <div className="flex justify-between mb-2">
-                    <h5 className="font-bold">
-                      {item[0]}
-                    </h5>
-
-                    <span className="text-gray-400 text-sm">
-                      {item[2]}
-                    </span>
-                  </div>
-
-                  <p>{item[1]}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* RIGHT */}
-            <div className="bg-[#111827] border border-cyan-400 rounded-3xl p-8">
-              <h4 className="text-2xl font-bold mb-6">
-                Submit Your Answer
-              </h4>
-
-              <div className="space-y-5">
-                <input
-                  type="text"
-                  placeholder="Student Name"
-                  className="w-full bg-black border border-gray-700 rounded-xl px-5 py-4"
-                />
-
-                <textarea
-                  rows="5"
-                  placeholder="Enter your answer..."
-                  className="w-full bg-black border border-gray-700 rounded-xl px-5 py-4 resize-none"
-                />
-
-                <button className="w-full bg-gradient-to-r from-green-400 to-cyan-400 text-black font-bold py-4 rounded-xl hover:scale-[1.02] transition">
-                  Submit Answer
-                </button>
-              </div>
-            </div>
-
-          </div>
-        </section>
-
-      </main>
+        </div>
+      </div>
     </div>
+  );
+}
+
+// ─── LEADERBOARD SUBTAB ────────────────────────────────────────────────────
+function LeaderboardView({ scores }) {
+  const totalWeeks = getCurrentWeek() + 1;
+  const [week, setWeek] = useState(getCurrentWeek());
+  const entries = scores[week] || [];
+  const board = calcLeaderboard(entries);
+
+  return (
+    <div style={{ padding: "32px 40px", animation: "fadeUp 0.4s ease both" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 32, flexWrap: "wrap" }}>
+        <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 22, color: "#fff", margin: 0 }}>🏆 Weekly Leaderboard</h2>
+        <select
+          value={week}
+          onChange={e => setWeek(Number(e.target.value))}
+          style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, color: "#fff", padding: "8px 14px", fontFamily: "'Fira Code', monospace", fontSize: 13, cursor: "pointer" }}
+        >
+          {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w => (
+            <option key={w} value={w} style={{ background: "#0a0a0f" }}>{getWeekLabel(w)} {w === getCurrentWeek() ? "← Current" : ""}</option>
+          ))}
+        </select>
+      </div>
+
+      {board.length === 0 ? (
+        <Glass style={{ padding: 40, textAlign: "center" }}>
+          <p style={{ fontFamily: "'Exo 2', sans-serif", color: "rgba(255,255,255,0.4)", fontSize: 16 }}>No scores yet for this week. Be the first to enter! 🥷</p>
+        </Glass>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Header */}
+          <div style={{ display: "grid", gridTemplateColumns: "50px 1fr 140px 120px", gap: 16, padding: "8px 20px", fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.35)", letterSpacing: 1.5 }}>
+            <span>RANK</span><span>NINJA</span><span style={{ textAlign: "right" }}>TOTAL PTS</span><span style={{ textAlign: "right" }}>ENTRIES</span>
+          </div>
+          {board.map((ninja, i) => {
+            const rank = i + 1;
+            const glowColor = rank === 1 ? "#ffd700" : rank === 2 ? "#c0c0c0" : rank === 3 ? "#cd7f32" : "transparent";
+            return (
+              <Glass
+                key={ninja.name}
+                style={{
+                  padding: "16px 20px",
+                  borderColor: rank <= 3 ? `${glowColor}44` : "rgba(255,255,255,0.08)",
+                  boxShadow: rank <= 3 ? `0 0 20px ${glowColor}22, 0 8px 24px rgba(0,0,0,0.4)` : "0 4px 16px rgba(0,0,0,0.3)",
+                  animation: `fadeUp 0.4s ease both ${i * 0.06}s`,
+                  transition: "transform 0.2s",
+                  cursor: "default",
+                }}
+                onMouseEnter={e => e.currentTarget.style.transform = "translateX(4px)"}
+                onMouseLeave={e => e.currentTarget.style.transform = "none"}
+              >
+                <div style={{ display: "grid", gridTemplateColumns: "50px 1fr 140px 120px", gap: 16, alignItems: "center" }}>
+                  <RankBadge rank={rank} />
+                  <div>
+                    <div style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 15, color: "#fff" }}>{ninja.name}</div>
+                    <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 10, color: "rgba(255,255,255,0.35)", marginTop: 2 }}>
+                      Best 3: {ninja.top3.join(" + ")} = {ninja.total}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 18, color: rank <= 3 ? glowColor : "#39ff14", textShadow: rank <= 3 ? `0 0 12px ${glowColor}` : "0 0 8px #39ff14" }}>
+                    {ninja.total.toLocaleString()}
+                  </div>
+                  <div style={{ textAlign: "right", fontFamily: "'Fira Code', monospace", fontSize: 13, color: "rgba(255,255,255,0.5)" }}>
+                    {ninja.entries} {ninja.entries === 1 ? "entry" : "entries"}
+                  </div>
+                </div>
+              </Glass>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── ENTER SCORES SUBTAB ───────────────────────────────────────────────────
+function EnterScores({ scores, setScores, setToast }) {
+  const [name, setName] = useState("");
+  const [pts, setPts] = useState("");
+  const [errors, setErrors] = useState({});
+  const currentWeek = getCurrentWeek();
+  const weekEntries = scores[currentWeek] || [];
+  const ninjaEntries = name.trim() ? weekEntries.filter(e => e.name.toLowerCase() === name.trim().toLowerCase()) : [];
+  const board = calcLeaderboard(weekEntries);
+  const ninjaRank = board.findIndex(n => n.name.toLowerCase() === name.trim().toLowerCase()) + 1;
+  const ninjaSummary = board.find(n => n.name.toLowerCase() === name.trim().toLowerCase());
+
+  function submit() {
+    const errs = {};
+    if (!name.trim()) errs.name = "Name is required";
+    const p = Number(pts);
+    if (!pts || isNaN(p)) errs.pts = "Must be a number";
+    else if (p < 0) errs.pts = "No negative points!";
+    if (Object.keys(errs).length) { setErrors(errs); return; }
+    setErrors({});
+    const newEntry = { id: Date.now(), name: name.trim(), points: p, ts: Date.now() };
+    const updated = { ...scores, [currentWeek]: [...weekEntries, newEntry] };
+    setScores(updated);
+    saveScores(updated);
+    setPts("");
+    setToast(`${name.trim()} scored ${p} points! 🎉`);
+  }
+
+  return (
+    <div style={{ padding: "32px 40px", animation: "fadeUp 0.4s ease both" }}>
+      <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 22, color: "#fff", marginBottom: 8 }}>📝 Enter Scores</h2>
+      <p style={{ fontFamily: "'Fira Code', monospace", fontSize: 12, color: "rgba(255,255,255,0.4)", marginBottom: 32 }}>
+        Current: {getWeekLabel(currentWeek)}
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
+        {/* FORM */}
+        <Glass style={{ padding: 28 }}>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 8, letterSpacing: 1 }}>NINJA NAME</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. ShadowByte"
+              style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: `1px solid ${errors.name ? "#ff2d78" : "rgba(255,255,255,0.15)"}`, borderRadius: 10, padding: "12px 16px", color: "#fff", fontFamily: "'Exo 2', sans-serif", fontSize: 14, outline: "none", boxSizing: "border-box", transition: "border-color 0.2s" }}
+              onFocus={e => e.target.style.borderColor = "#00cfff"}
+              onBlur={e => e.target.style.borderColor = errors.name ? "#ff2d78" : "rgba(255,255,255,0.15)"}
+            />
+            {errors.name && <p style={{ color: "#ff2d78", fontSize: 11, marginTop: 4, fontFamily: "'Fira Code', monospace" }}>{errors.name}</p>}
+          </div>
+          <div style={{ marginBottom: 28 }}>
+            <label style={{ display: "block", fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 8, letterSpacing: 1 }}>POINTS</label>
+            <input
+              value={pts}
+              onChange={e => setPts(e.target.value)}
+              placeholder="e.g. 850"
+              type="number"
+              min="0"
+              style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: `1px solid ${errors.pts ? "#ff2d78" : "rgba(255,255,255,0.15)"}`, borderRadius: 10, padding: "12px 16px", color: "#fff", fontFamily: "'Fira Code', monospace", fontSize: 16, outline: "none", boxSizing: "border-box" }}
+              onFocus={e => e.target.style.borderColor = "#39ff14"}
+              onBlur={e => e.target.style.borderColor = errors.pts ? "#ff2d78" : "rgba(255,255,255,0.15)"}
+              onKeyDown={e => e.key === "Enter" && submit()}
+            />
+            {errors.pts && <p style={{ color: "#ff2d78", fontSize: 11, marginTop: 4, fontFamily: "'Fira Code', monospace" }}>{errors.pts}</p>}
+          </div>
+          <button
+            onClick={submit}
+            style={{ width: "100%", padding: "14px", borderRadius: 10, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#39ff14,#00cfff)", color: "#000", fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: 1, transition: "opacity 0.2s, transform 0.2s" }}
+            onMouseEnter={e => { e.target.style.opacity = "0.9"; e.target.style.transform = "scale(1.02)"; }}
+            onMouseLeave={e => { e.target.style.opacity = "1"; e.target.style.transform = "none"; }}
+          >
+            SUBMIT SCORE ⚡
+          </button>
+        </Glass>
+
+        {/* LIVE PREVIEW */}
+        <Glass style={{ padding: 28, borderColor: ninjaSummary ? "#39ff1433" : "rgba(255,255,255,0.08)" }}>
+          <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, color: "#39ff14", marginBottom: 20, letterSpacing: 1 }}>LIVE PREVIEW</h3>
+          {ninjaSummary ? (
+            <>
+              <div style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 18, color: "#fff", marginBottom: 4 }}>{ninjaSummary.name}</div>
+              <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 20 }}>Rank #{ninjaRank} this week</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ background: "rgba(255,255,255,0.04)", borderRadius: 8, padding: "12px 14px" }}>
+                  <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 10, color: "rgba(255,255,255,0.35)", marginBottom: 6, letterSpacing: 1 }}>ALL ENTRIES</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {ninjaEntries.sort((a, b) => b.points - a.points).map((e, i) => (
+                      <span key={e.id} style={{ background: i < 3 ? "rgba(57,255,20,0.15)" : "rgba(255,255,255,0.05)", border: `1px solid ${i < 3 ? "#39ff1444" : "transparent"}`, borderRadius: 6, padding: "4px 10px", fontFamily: "'Fira Code', monospace", fontSize: 12, color: i < 3 ? "#39ff14" : "rgba(255,255,255,0.5)" }}>
+                        {e.points}{i < 3 ? " ✓" : ""}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <div style={{ background: "rgba(57,255,20,0.08)", border: "1px solid #39ff1433", borderRadius: 8, padding: "12px 14px" }}>
+                    <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 10, color: "rgba(255,255,255,0.35)", marginBottom: 4 }}>WEEKLY TOTAL</div>
+                    <div style={{ fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 20, color: "#39ff14" }}>{ninjaSummary.total}</div>
+                  </div>
+                  <div style={{ background: "rgba(0,207,255,0.08)", border: "1px solid #00cfff33", borderRadius: 8, padding: "12px 14px" }}>
+                    <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 10, color: "rgba(255,255,255,0.35)", marginBottom: 4 }}>ENTRIES</div>
+                    <div style={{ fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 20, color: "#00cfff" }}>{ninjaSummary.entries}</div>
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 140, gap: 12 }}>
+              <div style={{ fontSize: 40 }}>🥷</div>
+              <p style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.3)", textAlign: "center" }}>Enter a ninja name to see their live stats</p>
+            </div>
+          )}
+        </Glass>
+      </div>
+    </div>
+  );
+}
+
+// ─── LEADERBOARD TAB ───────────────────────────────────────────────────────
+function LeaderboardsTab({ scores, setScores, setToast }) {
+  const [sub, setSub] = useState("view");
+  return (
+    <div style={{ minHeight: "100vh" }}>
+      <div style={{ padding: "32px 40px 0", display: "flex", gap: 8 }}>
+        {[{ id: "view", label: "🏆 Weekly Leaderboard" }, { id: "enter", label: "📝 Enter Scores" }].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setSub(t.id)}
+            style={{ padding: "10px 22px", borderRadius: 99, border: "none", cursor: "pointer", fontFamily: "'Exo 2', sans-serif", fontWeight: 600, fontSize: 13, transition: "all 0.2s", background: sub === t.id ? "linear-gradient(135deg,#39ff14,#00cfff)" : "rgba(255,255,255,0.07)", color: sub === t.id ? "#000" : "rgba(255,255,255,0.6)", boxShadow: sub === t.id ? "0 0 20px #39ff1444" : "none" }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {sub === "view" ? <LeaderboardView scores={scores} /> : <EnterScores scores={scores} setScores={setScores} setToast={setToast} />}
+    </div>
+  );
+}
+
+// ─── RIDDLE TAB ────────────────────────────────────────────────────────────
+const DEFAULT_RIDDLES_TEXT = {
+  1: "I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?",
+  2: "I have cities, but no houses live there. I have mountains, but no trees. I have water, but no fish. What am I?",
+  3: "The more you take, the more you leave behind. What am I?",
+};
+
+function RiddleTab({ setToast }) {
+  const totalWeeks = getCurrentWeek() + 1;
+  const [week, setWeek] = useState(getCurrentWeek());
+  const [riddlesData, setRiddlesData] = useState(loadRiddles);
+  const [sName, setSName] = useState("");
+  const [sAnswer, setSAnswer] = useState("");
+  const [riddleText, setRiddleText] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const weekData = riddlesData[week] || { text: DEFAULT_RIDDLES_TEXT[week] || "No riddle set for this week yet. Check back soon!", answers: [] };
+
+  function submitAnswer() {
+    const errs = {};
+    if (!sName.trim()) errs.name = "Name required";
+    if (!sAnswer.trim()) errs.answer = "Answer required";
+    if (Object.keys(errs).length) { setErrors(errs); return; }
+    setErrors({});
+    const newAns = { name: sName.trim(), answer: sAnswer.trim(), ts: Date.now() };
+    const updated = { ...riddlesData, [week]: { ...weekData, answers: [...weekData.answers, newAns] } };
+    setRiddlesData(updated);
+    saveRiddles(updated);
+    setSName("");
+    setSAnswer("");
+    setToast(`${sName.trim()} submitted their answer! 🧩`);
+  }
+
+  function saveRiddle() {
+    const updated = { ...riddlesData, [week]: { ...weekData, text: riddleText } };
+    setRiddlesData(updated);
+    saveRiddles(updated);
+    setEditMode(false);
+    setToast("Riddle updated! ✏️");
+  }
+
+  return (
+    <div style={{ padding: "32px 40px", minHeight: "100vh", animation: "fadeUp 0.4s ease both" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 32, flexWrap: "wrap" }}>
+        <h2 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 22, color: "#fff", margin: 0 }}>🧩 Riddle of the Week</h2>
+        <select
+          value={week}
+          onChange={e => setWeek(Number(e.target.value))}
+          style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 8, color: "#fff", padding: "8px 14px", fontFamily: "'Fira Code', monospace", fontSize: 13, cursor: "pointer" }}
+        >
+          {Array.from({ length: totalWeeks }, (_, i) => i + 1).map(w => (
+            <option key={w} value={w} style={{ background: "#0a0a0f" }}>{getWeekLabel(w)} {w === getCurrentWeek() ? "← Current" : ""}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* RIDDLE CARD */}
+      <Glass style={{ padding: 32, marginBottom: 32, borderColor: "#ff2d7833", boxShadow: "0 0 40px #ff2d7822, 0 8px 32px rgba(0,0,0,0.4)", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg,#ff2d78,#00cfff,#39ff14)" }} />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.35)", letterSpacing: 2, marginBottom: 16 }}>RIDDLE #{week}</div>
+          <button
+            onClick={() => { setEditMode(!editMode); setRiddleText(weekData.text); }}
+            style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, color: "rgba(255,255,255,0.5)", padding: "6px 12px", cursor: "pointer", fontFamily: "'Fira Code', monospace", fontSize: 11 }}
+          >
+            {editMode ? "✕ Cancel" : "✏️ Edit"}
+          </button>
+        </div>
+        {editMode ? (
+          <div>
+            <textarea
+              value={riddleText}
+              onChange={e => setRiddleText(e.target.value)}
+              style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid #00cfff44", borderRadius: 10, padding: "14px 16px", color: "#fff", fontFamily: "'Exo 2', sans-serif", fontSize: 16, lineHeight: 1.6, outline: "none", resize: "vertical", minHeight: 100, boxSizing: "border-box" }}
+            />
+            <button
+              onClick={saveRiddle}
+              style={{ marginTop: 12, padding: "10px 24px", borderRadius: 8, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#ff2d78,#00cfff)", color: "#000", fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 12 }}
+            >
+              SAVE RIDDLE
+            </button>
+          </div>
+        ) : (
+          <p style={{ fontFamily: "'Exo 2', sans-serif", fontSize: "clamp(15px,1.8vw,20px)", color: "#fff", lineHeight: 1.7, margin: 0, fontStyle: "italic" }}>
+            "{weekData.text}"
+          </p>
+        )}
+      </Glass>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 32 }}>
+        {/* SUBMIT ANSWER */}
+        <Glass style={{ padding: 24 }}>
+          <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, color: "#ff2d78", marginBottom: 20, letterSpacing: 1 }}>SUBMIT YOUR ANSWER</h3>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 8, letterSpacing: 1 }}>STUDENT NAME</label>
+            <input
+              value={sName}
+              onChange={e => setSName(e.target.value)}
+              placeholder="Your ninja name"
+              style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: `1px solid ${errors.name ? "#ff2d78" : "rgba(255,255,255,0.15)"}`, borderRadius: 10, padding: "12px 16px", color: "#fff", fontFamily: "'Exo 2', sans-serif", fontSize: 14, outline: "none", boxSizing: "border-box" }}
+            />
+            {errors.name && <p style={{ color: "#ff2d78", fontSize: 11, marginTop: 4, fontFamily: "'Fira Code', monospace" }}>{errors.name}</p>}
+          </div>
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: "block", fontFamily: "'Fira Code', monospace", fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 8, letterSpacing: 1 }}>YOUR ANSWER</label>
+            <textarea
+              value={sAnswer}
+              onChange={e => setSAnswer(e.target.value)}
+              placeholder="Type your answer here..."
+              style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: `1px solid ${errors.answer ? "#ff2d78" : "rgba(255,255,255,0.15)"}`, borderRadius: 10, padding: "12px 16px", color: "#fff", fontFamily: "'Exo 2', sans-serif", fontSize: 14, outline: "none", resize: "vertical", minHeight: 80, boxSizing: "border-box" }}
+            />
+            {errors.answer && <p style={{ color: "#ff2d78", fontSize: 11, marginTop: 4, fontFamily: "'Fira Code', monospace" }}>{errors.answer}</p>}
+          </div>
+          <button
+            onClick={submitAnswer}
+            style={{ width: "100%", padding: 13, borderRadius: 10, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#ff2d78,#00cfff)", color: "#000", fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 13, letterSpacing: 1 }}
+            onMouseEnter={e => e.target.style.opacity = "0.9"}
+            onMouseLeave={e => e.target.style.opacity = "1"}
+          >
+            SUBMIT ANSWER 🧩
+          </button>
+        </Glass>
+
+        {/* ANSWERS LIST */}
+        <div>
+          <h3 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 13, color: "#00cfff", marginBottom: 16, letterSpacing: 1 }}>
+            STUDENT ANSWERS ({weekData.answers.length})
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: 400, overflowY: "auto" }}>
+            {weekData.answers.length === 0 ? (
+              <Glass style={{ padding: 24, textAlign: "center" }}>
+                <p style={{ fontFamily: "'Exo 2', sans-serif", color: "rgba(255,255,255,0.35)", fontSize: 14 }}>No answers yet — be the first! 🧠</p>
+              </Glass>
+            ) : (
+              weekData.answers.map((a, i) => (
+                <Glass
+                  key={i}
+                  style={{ padding: "14px 18px", animation: `fadeUp 0.3s ease both ${i * 0.05}s`, transition: "transform 0.2s" }}
+                  onMouseEnter={e => e.currentTarget.style.transform = "translateX(4px)"}
+                  onMouseLeave={e => e.currentTarget.style.transform = "none"}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontFamily: "'Exo 2', sans-serif", fontWeight: 700, fontSize: 14, color: "#00cfff" }}>{a.name}</span>
+                    <span style={{ fontFamily: "'Fira Code', monospace", fontSize: 10, color: "rgba(255,255,255,0.3)" }}>{new Date(a.ts).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  </div>
+                  <p style={{ fontFamily: "'Exo 2', sans-serif", fontSize: 13, color: "rgba(255,255,255,0.75)", margin: 0 }}>{a.answer}</p>
+                </Glass>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SIDEBAR ───────────────────────────────────────────────────────────────
+const NAV = [
+  { id: "home", icon: "🏠", label: "Home" },
+  { id: "leaderboards", icon: "🏆", label: "Leaderboards" },
+  { id: "riddle", icon: "🧩", label: "Riddle of the Week" },
+];
+
+function Sidebar({ active, onNav }) {
+  return (
+    <div style={{ width: 220, flexShrink: 0, height: "100vh", position: "sticky", top: 0, display: "flex", flexDirection: "column", padding: "24px 16px", gap: 8, background: "rgba(0,0,0,0.3)", backdropFilter: "blur(24px)", borderRight: "1px solid rgba(255,255,255,0.06)", zIndex: 10 }}>
+      {/* LOGO */}
+      <div style={{ padding: "16px 12px 28px", textAlign: "center" }}>
+        <div style={{ fontFamily: "'Orbitron', sans-serif", fontWeight: 900, fontSize: 13, letterSpacing: 1.5, color: "#39ff14", textShadow: "0 0 16px #39ff14aa", lineHeight: 1.4 }}>
+          CODE NINJAS
+        </div>
+        <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 10, color: "rgba(255,255,255,0.3)", letterSpacing: 2, marginTop: 2 }}>ROBBINSVILLE</div>
+        <div style={{ width: 40, height: 2, background: "linear-gradient(90deg,#39ff14,#00cfff)", margin: "12px auto 0", borderRadius: 99 }} />
+      </div>
+      {NAV.map(item => (
+        <button
+          key={item.id}
+          onClick={() => onNav(item.id)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "12px 16px",
+            borderRadius: 12,
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "'Exo 2', sans-serif",
+            fontWeight: 600,
+            fontSize: 13,
+            transition: "all 0.2s",
+            background: active === item.id ? "linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))" : "transparent",
+            color: active === item.id ? "#fff" : "rgba(255,255,255,0.45)",
+            boxShadow: active === item.id ? "inset 0 0 0 1px rgba(57,255,20,0.3), 0 0 16px rgba(57,255,20,0.1)" : "none",
+            textAlign: "left",
+          }}
+          onMouseEnter={e => { if (active !== item.id) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "#fff"; }}
+          onMouseLeave={e => { if (active !== item.id) { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "rgba(255,255,255,0.45)"; } }}
+        >
+          <span style={{ fontSize: 18 }}>{item.icon}</span>
+          {item.label}
+        </button>
+      ))}
+      {/* Bottom week indicator */}
+      <div style={{ marginTop: "auto", padding: "16px 12px" }}>
+        <Glass style={{ padding: "12px 14px" }}>
+          <div style={{ fontFamily: "'Fira Code', monospace", fontSize: 9, color: "rgba(255,255,255,0.3)", letterSpacing: 1, marginBottom: 4 }}>CURRENT</div>
+          <div style={{ fontFamily: "'Orbitron', sans-serif", fontWeight: 700, fontSize: 12, color: "#39ff14" }}>WEEK {getCurrentWeek()}</div>
+        </Glass>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP ───────────────────────────────────────────────────────────────────
+export default function App() {
+  const [tab, setTab] = useState("home");
+  const [scores, setScores] = useState(loadScores);
+  const [toast, setToast] = useState(null);
+
+  return (
+    <>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #060609; color: #fff; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(57,255,20,0.3); border-radius: 99px; }
+        input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.2); }
+        input[type=number] { -moz-appearance: textfield; }
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+        select option { background: #0a0a0f; color: #fff; }
+
+        @keyframes fadeSlideLeft { from { opacity: 0; transform: translateX(-30px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes fadeSlideRight { from { opacity: 0; transform: translateX(30px); } to { opacity: 1; transform: translateX(0); } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes pulse { 0%, 100% { box-shadow: 0 0 30px #39ff1455, 0 0 60px #00cfff33; } 50% { box-shadow: 0 0 50px #39ff1488, 0 0 80px #00cfff55; } }
+        @keyframes floatUp { 0% { transform: translateY(0) rotate(0deg); opacity: 0; } 10% { opacity: 1; } 90% { opacity: 0.5; } 100% { transform: translateY(-100vh) rotate(5deg); opacity: 0; } }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+        .tab-content { animation: fadeUp 0.35s ease both; }
+      `}</style>
+
+      {/* BG MESH */}
+      <div style={{ position: "fixed", inset: 0, zIndex: 0, pointerEvents: "none", background: "radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%), radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%), radial-gradient(ellipse 40% 40% at 60% 60%,rgba(255,45,120,0.04) 0%,transparent 70%), #060609" }} />
+
+      <div style={{ display: "flex", minHeight: "100vh", position: "relative", zIndex: 1 }}>
+        <Sidebar active={tab} onNav={setTab} />
+        <div style={{ flex: 1, overflow: "auto" }} className="tab-content" key={tab}>
+          {tab === "home" && <HomeTab onNav={setTab} />}
+          {tab === "leaderboards" && <LeaderboardsTab scores={scores} setScores={setScores} setToast={setToast} />}
+          {tab === "riddle" && <RiddleTab setToast={setToast} />}
+        </div>
+      </div>
+
+      {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
+    </>
   );
 }
