@@ -28,6 +28,7 @@ select option{background:#0a0a0f;color:#fff;}
 @keyframes floatUp{0%{transform:translateY(0) rotate(0deg);opacity:0}10%{opacity:1}90%{opacity:0.5}100%{transform:translateY(-110vh) rotate(5deg);opacity:0}}
 @keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes shakeCard{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}
 </style>
 </head>
 <body>
@@ -35,7 +36,17 @@ select option{background:#0a0a0f;color:#fff;}
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-// ── WEEK UTILS ──────────────────────────────────────────────────────────────
+/* ── STORAGE (cross-device via window.storage API) ─────────────────────────── */
+async function storageGet(key){
+  try{const r=await window.storage.get(key,true);return r?JSON.parse(r.value):null;}
+  catch{return null;}
+}
+async function storageSet(key,val){
+  try{await window.storage.set(key,JSON.stringify(val),true);}
+  catch(e){console.error("storage set failed",e);}
+}
+
+/* ── WEEK UTILS ──────────────────────────────────────────────────────────────*/
 const WEEK_START = new Date("2026-05-13T00:00:00");
 function getCurrentWeek(){
   const diff = new Date() - WEEK_START;
@@ -48,46 +59,7 @@ function getWeekLabel(n){
   return `Week ${n} (${fmt(s)} – ${fmt(e)})`;
 }
 
-// ── MOCK DATA ───────────────────────────────────────────────────────────────
-const MOCK_SCORES = {
-  1:[
-    {id:1,name:"ShadowByte",points:980,ts:Date.now()-9e5},
-    {id:2,name:"NeonKatana",points:860,ts:Date.now()-8e5},
-    {id:3,name:"PixelStorm",points:940,ts:Date.now()-7e5},
-    {id:4,name:"ShadowByte",points:750,ts:Date.now()-6e5},
-    {id:5,name:"ZeroCode",points:1020,ts:Date.now()-5e5},
-    {id:6,name:"NeonKatana",points:910,ts:Date.now()-4e5},
-    {id:7,name:"PixelStorm",points:870,ts:Date.now()-3e5},
-    {id:8,name:"ZeroCode",points:850,ts:Date.now()-2e5},
-    {id:9,name:"ShadowByte",points:905,ts:Date.now()-1e5},
-    {id:10,name:"ByteWizard",points:770,ts:Date.now()-5e4},
-    {id:11,name:"ZeroCode",points:990,ts:Date.now()-3e4},
-    {id:12,name:"ByteWizard",points:820,ts:Date.now()-1e4},
-  ]
-};
-const MOCK_RIDDLES = {
-  1:{text:"I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?",
-     answers:[
-       {name:"NeonKatana",answer:"An echo!",ts:Date.now()-8e5},
-       {name:"PixelStorm",answer:"The wind itself?",ts:Date.now()-6e5},
-       {name:"ZeroCode",answer:"An echo — sound bouncing back!",ts:Date.now()-4e5},
-     ]},
-  2:{text:"I have cities, but no houses live there. I have mountains, but no trees. I have water, but no fish. What am I?",answers:[]},
-  3:{text:"The more you take, the more you leave behind. What am I?",answers:[]},
-};
-const DEFAULT_RIDDLE_TEXT = {
-  1:"I speak without a mouth and hear without ears. I have no body, but I come alive with wind. What am I?",
-  2:"I have cities, but no houses live there. I have mountains, but no trees. I have water, but no fish. What am I?",
-  3:"The more you take, the more you leave behind. What am I?",
-};
-
-// ── STORAGE ─────────────────────────────────────────────────────────────────
-function loadScores(){try{const r=localStorage.getItem("cn_scores");return r?JSON.parse(r):MOCK_SCORES;}catch{return MOCK_SCORES;}}
-function saveScores(d){localStorage.setItem("cn_scores",JSON.stringify(d));}
-function loadRiddles(){try{const r=localStorage.getItem("cn_riddles");return r?JSON.parse(r):MOCK_RIDDLES;}catch{return MOCK_RIDDLES;}}
-function saveRiddles(d){localStorage.setItem("cn_riddles",JSON.stringify(d));}
-
-// ── LEADERBOARD CALC ─────────────────────────────────────────────────────────
+/* ── LEADERBOARD CALC ─────────────────────────────────────────────────────────*/
 function calcBoard(entries=[]){
   const map={};
   entries.forEach(e=>{if(!map[e.name])map[e.name]=[];map[e.name].push(e.points);});
@@ -98,7 +70,7 @@ function calcBoard(entries=[]){
   }).sort((a,b)=>b.total-a.total);
 }
 
-// ── PARTICLES ────────────────────────────────────────────────────────────────
+/* ── PARTICLES ────────────────────────────────────────────────────────────── */
 function Particles(){
   const ref=useRef();
   useEffect(()=>{
@@ -131,7 +103,7 @@ function Particles(){
   return <canvas ref={ref} style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}/>;
 }
 
-// ── FLOATING CODE ────────────────────────────────────────────────────────────
+/* ── FLOATING CODE ───────────────────────────────────────────────────────── */
 const CODE_LINES=["const ninja = new Coder();","while(learning) { level++; }","function achieve(goal) {","  return skill * effort;","}","if (rank === 1) celebrate();","ninja.train(['python','js']);","const points = score * combo;","export default Ninja;","// keep coding! 🥷"];
 function FloatingCode(){
   return(
@@ -149,7 +121,7 @@ function FloatingCode(){
   );
 }
 
-// ── GLASS ────────────────────────────────────────────────────────────────────
+/* ── GLASS ───────────────────────────────────────────────────────────────── */
 function Glass({children,style={},onMouseEnter,onMouseLeave}){
   return(
     <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
@@ -161,7 +133,7 @@ function Glass({children,style={},onMouseEnter,onMouseLeave}){
   );
 }
 
-// ── RANK BADGE ───────────────────────────────────────────────────────────────
+/* ── RANK BADGE ──────────────────────────────────────────────────────────── */
 function RankBadge({rank}){
   const cfg={1:{bg:"linear-gradient(135deg,#ffd700,#ff8c00)",shadow:"#ffd700",e:"👑"},
              2:{bg:"linear-gradient(135deg,#c0c0c0,#808080)",shadow:"#c0c0c0",e:"🥈"},
@@ -177,7 +149,7 @@ function RankBadge({rank}){
   );
 }
 
-// ── TOAST ────────────────────────────────────────────────────────────────────
+/* ── TOAST ───────────────────────────────────────────────────────────────── */
 function Toast({msg,onDone}){
   useEffect(()=>{const t=setTimeout(onDone,3000);return()=>clearTimeout(t);},[]);
   return(
@@ -189,8 +161,26 @@ function Toast({msg,onDone}){
   );
 }
 
-// ── HOME ─────────────────────────────────────────────────────────────────────
-function HomeTab({onNav}){
+/* ── HOME ──────────────────────────────────────────────────────────────────*/
+function HomeTab({onNav, scores}){
+  const cw = getCurrentWeek();
+  const weekEntries = scores[cw] || [];
+  const board = calcBoard(weekEntries);
+  const topNinja = board[0];
+
+  // compute real stats
+  const allNinjas = new Set();
+  Object.values(scores).forEach(wk=>(wk||[]).forEach(e=>allNinjas.add(e.name)));
+  const totalEntries = Object.values(scores).reduce((s,wk)=>s+(wk||[]).length,0);
+  const topScore = Math.max(0,...Object.values(scores).flatMap(wk=>(wk||[]).map(e=>e.points)));
+
+  const statCards = [
+    {icon:"🥷",label:"Active Ninjas",val:String(allNinjas.size||0),color:"#39ff14"},
+    {icon:"🏅",label:"This Week's #1",val:topNinja?topNinja.name:"—",color:"#ffd700"},
+    {icon:"💻",label:"Total Entries",val:String(totalEntries),color:"#00cfff"},
+    {icon:"🔥",label:"Top Score",val:topScore>0?`${topScore.toLocaleString()} pts`:"—",color:"#ff2d78"},
+  ];
+
   return(
     <div style={{position:"relative",height:"100vh",display:"flex",alignItems:"center",overflow:"hidden"}}>
       <Particles/><FloatingCode/>
@@ -225,13 +215,10 @@ function HomeTab({onNav}){
             VIEW LEADERBOARDS →
           </button>
         </div>
-        {/* RIGHT */}
+        {/* RIGHT – live stats from real data */}
         <div style={{animation:"fadeSlideRight .7s ease both"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-            {[{icon:"🥷",label:"Active Ninjas",val:"24",color:"#39ff14"},
-              {icon:"🏅",label:"This Week's #1",val:"ZeroCode",color:"#ffd700"},
-              {icon:"💻",label:"Total Entries",val:"147",color:"#00cfff"},
-              {icon:"🔥",label:"Top Score",val:"1,020 pts",color:"#ff2d78"}].map((card,i)=>(
+            {statCards.map((card,i)=>(
               <Glass key={i} style={{padding:"22px 18px",borderColor:`${card.color}33`,
                 boxShadow:`0 8px 32px rgba(0,0,0,0.4),0 0 20px ${card.color}22`,
                 animation:`fadeUp .5s ease both ${.1+i*.1}s`,transition:"transform .2s,box-shadow .2s",cursor:"default"}}
@@ -263,7 +250,7 @@ function HomeTab({onNav}){
   );
 }
 
-// ── LEADERBOARD VIEW ─────────────────────────────────────────────────────────
+/* ── LEADERBOARD VIEW ────────────────────────────────────────────────────── */
 function LeaderboardView({scores}){
   const totalWeeks=getCurrentWeek()+1;
   const [week,setWeek]=useState(getCurrentWeek());
@@ -327,11 +314,35 @@ function LeaderboardView({scores}){
   );
 }
 
-// ── ENTER SCORES ─────────────────────────────────────────────────────────────
+/* ── DELETE ENTRY MODAL ──────────────────────────────────────────────────── */
+function DeleteModal({entry, onConfirm, onCancel}){
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <Glass style={{padding:32,maxWidth:380,width:"90%",borderColor:"#ff2d7844"}}>
+        <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,color:"#ff2d78",marginBottom:12}}>DELETE ENTRY?</h3>
+        <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:14,color:"rgba(255,255,255,0.7)",marginBottom:24,lineHeight:1.5}}>
+          Remove <strong style={{color:"#fff"}}>{entry.name}</strong>'s score of <strong style={{color:"#39ff14"}}>{entry.points} pts</strong>?
+          This cannot be undone.
+        </p>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onCancel} style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",
+            background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",cursor:"pointer",
+            fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13}}>Cancel</button>
+          <button onClick={onConfirm} style={{flex:1,padding:"11px",borderRadius:10,border:"none",cursor:"pointer",
+            background:"linear-gradient(135deg,#ff2d78,#ff6b35)",color:"#000",
+            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12}}>DELETE ✕</button>
+        </div>
+      </Glass>
+    </div>
+  );
+}
+
+/* ── ENTER SCORES (admin only) ───────────────────────────────────────────── */
 function EnterScores({scores,setScores,setToast}){
   const [name,setName]=useState("");
   const [pts,setPts]=useState("");
   const [errors,setErrors]=useState({});
+  const [deleteTarget,setDeleteTarget]=useState(null);
   const cw=getCurrentWeek();
   const weekEntries=scores[cw]||[];
   const ninjaEntries=name.trim()?weekEntries.filter(e=>e.name.toLowerCase()===name.trim().toLowerCase()):[];
@@ -339,7 +350,7 @@ function EnterScores({scores,setScores,setToast}){
   const ninjaSummary=board.find(n=>n.name.toLowerCase()===name.trim().toLowerCase());
   const ninjaRank=board.findIndex(n=>n.name.toLowerCase()===name.trim().toLowerCase())+1;
 
-  function submit(){
+  async function submit(){
     const errs={};
     if(!name.trim())errs.name="Name is required";
     const p=Number(pts);
@@ -348,9 +359,18 @@ function EnterScores({scores,setScores,setToast}){
     if(Object.keys(errs).length){setErrors(errs);return;}
     setErrors({});
     const updated={...scores,[cw]:[...weekEntries,{id:Date.now(),name:name.trim(),points:p,ts:Date.now()}]};
-    setScores(updated);saveScores(updated);
+    setScores(updated);
+    await storageSet("cn_scores",updated);
     setPts("");
     setToast(`${name.trim()} scored ${p} points! 🎉`);
+  }
+
+  async function deleteEntry(entry){
+    const updated={...scores,[cw]:weekEntries.filter(e=>e.id!==entry.id)};
+    setScores(updated);
+    await storageSet("cn_scores",updated);
+    setDeleteTarget(null);
+    setToast(`Deleted ${entry.name}'s ${entry.points}pt entry.`);
   }
 
   const inputStyle=(err)=>({width:"100%",background:"rgba(255,255,255,0.06)",
@@ -360,6 +380,7 @@ function EnterScores({scores,setScores,setToast}){
 
   return(
     <div style={{padding:"28px 36px",animation:"fadeUp .4s ease both"}}>
+      {deleteTarget&&<DeleteModal entry={deleteTarget} onConfirm={()=>deleteEntry(deleteTarget)} onCancel={()=>setDeleteTarget(null)}/>}
       <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,color:"#fff",marginBottom:6}}>📝 Enter Scores</h2>
       <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:28}}>{getWeekLabel(cw)}</p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
@@ -393,13 +414,20 @@ function EnterScores({scores,setScores,setToast}){
               <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:17,color:"#fff",marginBottom:2}}>{ninjaSummary.name}</div>
               <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:18}}>Rank #{ninjaRank} this week</div>
               <div style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
-                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>ALL ENTRIES (top 3 count)</div>
+                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>ALL ENTRIES (top 3 count) — click to delete</div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                   {ninjaEntries.sort((a,b)=>b.points-a.points).map((e,i)=>(
-                    <span key={e.id} style={{background:i<3?"rgba(57,255,20,0.15)":"rgba(255,255,255,0.05)",
-                      border:`1px solid ${i<3?"#39ff1444":"transparent"}`,borderRadius:6,
-                      padding:"4px 10px",fontFamily:"'Fira Code',monospace",fontSize:12,
-                      color:i<3?"#39ff14":"rgba(255,255,255,0.45)"}}>{e.points}{i<3?" ✓":""}</span>
+                    <span key={e.id}
+                      onClick={()=>setDeleteTarget(e)}
+                      title="Click to delete"
+                      style={{background:i<3?"rgba(57,255,20,0.15)":"rgba(255,255,255,0.05)",
+                        border:`1px solid ${i<3?"#39ff1444":"transparent"}`,borderRadius:6,
+                        padding:"4px 10px",fontFamily:"'Fira Code',monospace",fontSize:12,cursor:"pointer",
+                        color:i<3?"#39ff14":"rgba(255,255,255,0.45)",transition:"background .15s"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,45,120,0.2)"}
+                      onMouseLeave={ev=>ev.currentTarget.style.background=i<3?"rgba(57,255,20,0.15)":"rgba(255,255,255,0.05)"}>
+                      {e.points}{i<3?" ✓":""} ✕
+                    </span>
                   ))}
                 </div>
               </div>
@@ -426,52 +454,71 @@ function EnterScores({scores,setScores,setToast}){
   );
 }
 
-// ── LEADERBOARDS TAB ─────────────────────────────────────────────────────────
-function LeaderboardsTab({scores,setScores,setToast}){
+/* ── LEADERBOARDS TAB ────────────────────────────────────────────────────── */
+function LeaderboardsTab({scores,setScores,setToast,isAdmin}){
   const [sub,setSub]=useState("view");
+  const tabs=[{id:"view",label:"🏆 Weekly Leaderboard"}];
+  if(isAdmin) tabs.push({id:"enter",label:"📝 Enter Scores"});
   return(
     <div style={{minHeight:"100%"}}>
       <div style={{padding:"28px 36px 0",display:"flex",gap:8}}>
-        {[{id:"view",label:"🏆 Weekly Leaderboard"},{id:"enter",label:"📝 Enter Scores"}].map(t=>(
+        {tabs.map(t=>(
           <button key={t.id} onClick={()=>setSub(t.id)} style={{padding:"10px 20px",borderRadius:99,border:"none",cursor:"pointer",
             fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",
             background:sub===t.id?"linear-gradient(135deg,#39ff14,#00cfff)":"rgba(255,255,255,0.07)",
             color:sub===t.id?"#000":"rgba(255,255,255,0.6)",
             boxShadow:sub===t.id?"0 0 20px #39ff1444":"none"}}>{t.label}</button>
         ))}
+        {!isAdmin&&(
+          <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderRadius:99,
+            background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)"}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)"}}>👀 Guest — view only</span>
+          </div>
+        )}
       </div>
-      {sub==="view"?<LeaderboardView scores={scores}/>:<EnterScores scores={scores} setScores={setScores} setToast={setToast}/>}
+      {sub==="view"&&<LeaderboardView scores={scores}/>}
+      {sub==="enter"&&isAdmin&&<EnterScores scores={scores} setScores={setScores} setToast={setToast}/>}
     </div>
   );
 }
 
-// ── RIDDLE TAB ───────────────────────────────────────────────────────────────
-function RiddleTab({setToast}){
+/* ── RIDDLE TAB ──────────────────────────────────────────────────────────── */
+function RiddleTab({setToast,isAdmin,riddlesData,setRiddlesData}){
   const totalWeeks=getCurrentWeek()+1;
   const [week,setWeek]=useState(getCurrentWeek());
-  const [riddlesData,setRiddlesData]=useState(loadRiddles);
   const [sName,setSName]=useState("");
   const [sAnswer,setSAnswer]=useState("");
   const [riddleText,setRiddleText]=useState("");
   const [editMode,setEditMode]=useState(false);
   const [errors,setErrors]=useState({});
-  const weekData=riddlesData[week]||{text:DEFAULT_RIDDLE_TEXT[week]||"No riddle set yet. Check back soon!",answers:[]};
+  const weekData=riddlesData[week]||{text:"No riddle set for this week yet. Check back soon!",answers:[]};
 
-  function submitAnswer(){
+  async function submitAnswer(){
     const errs={};
     if(!sName.trim())errs.name="Name required";
     if(!sAnswer.trim())errs.answer="Answer required";
     if(Object.keys(errs).length){setErrors(errs);return;}
     setErrors({});
     const updated={...riddlesData,[week]:{...weekData,answers:[...weekData.answers,{name:sName.trim(),answer:sAnswer.trim(),ts:Date.now()}]}};
-    setRiddlesData(updated);saveRiddles(updated);
+    setRiddlesData(updated);
+    await storageSet("cn_riddles",updated);
     setSName("");setSAnswer("");
     setToast(`${sName.trim()} submitted their answer! 🧩`);
   }
-  function saveRiddle(){
+
+  async function saveRiddle(){
     const updated={...riddlesData,[week]:{...weekData,text:riddleText}};
-    setRiddlesData(updated);saveRiddles(updated);
+    setRiddlesData(updated);
+    await storageSet("cn_riddles",updated);
     setEditMode(false);setToast("Riddle updated! ✏️");
+  }
+
+  async function deleteAnswer(idx){
+    const newAnswers=weekData.answers.filter((_,i)=>i!==idx);
+    const updated={...riddlesData,[week]:{...weekData,answers:newAnswers}};
+    setRiddlesData(updated);
+    await storageSet("cn_riddles",updated);
+    setToast("Answer removed.");
   }
 
   const inputStyle=(err)=>({width:"100%",background:"rgba(255,255,255,0.06)",
@@ -497,13 +544,15 @@ function RiddleTab({setToast}){
         <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#ff2d78,#00cfff,#39ff14)"}}/>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>RIDDLE #{week}</span>
-          <button onClick={()=>{setEditMode(!editMode);setRiddleText(weekData.text);}}
-            style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,
-              color:"rgba(255,255,255,0.5)",padding:"5px 12px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
-            {editMode?"✕ Cancel":"✏️ Edit"}
-          </button>
+          {isAdmin&&(
+            <button onClick={()=>{setEditMode(!editMode);setRiddleText(weekData.text);}}
+              style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,
+                color:"rgba(255,255,255,0.5)",padding:"5px 12px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
+              {editMode?"✕ Cancel":"✏️ Edit"}
+            </button>
+          )}
         </div>
-        {editMode?(
+        {editMode&&isAdmin?(
           <div>
             <textarea value={riddleText} onChange={e=>setRiddleText(e.target.value)}
               style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid #00cfff44",borderRadius:10,
@@ -556,11 +605,18 @@ function RiddleTab({setToast}){
               <Glass key={i} style={{padding:"13px 16px",animation:`fadeUp .3s ease both ${i*.05}s`,transition:"transform .2s"}}
                 onMouseEnter={e=>e.currentTarget.style.transform="translateX(4px)"}
                 onMouseLeave={e=>e.currentTarget.style.transform="none"}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
                   <span style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:13,color:"#00cfff"}}>{a.name}</span>
-                  <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)"}}>
-                    {new Date(a.ts).toLocaleDateString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}
-                  </span>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)"}}>
+                      {new Date(a.ts).toLocaleDateString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}
+                    </span>
+                    {isAdmin&&(
+                      <button onClick={()=>deleteAnswer(i)} title="Delete answer"
+                        style={{background:"rgba(255,45,120,0.1)",border:"1px solid #ff2d7844",borderRadius:6,
+                          color:"#ff2d78",padding:"2px 7px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>✕</button>
+                    )}
+                  </div>
                 </div>
                 <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.75)",margin:0}}>{a.answer}</p>
               </Glass>
@@ -572,7 +628,7 @@ function RiddleTab({setToast}){
   );
 }
 
-// ── SIDEBAR ──────────────────────────────────────────────────────────────────
+/* ── SIDEBAR ─────────────────────────────────────────────────────────────── */
 const NAV=[{id:"home",icon:"🏠",label:"Home"},{id:"leaderboards",icon:"🏆",label:"Leaderboards"},{id:"riddle",icon:"🧩",label:"Riddle of the Week"}];
 function Sidebar({active,onNav,isAdmin,onLogout}){
   return(
@@ -604,7 +660,7 @@ function Sidebar({active,onNav,isAdmin,onLogout}){
           color:active===item.id?"#fff":"rgba(255,255,255,0.4)",
           boxShadow:active===item.id?"inset 0 0 0 1px rgba(57,255,20,0.3),0 0 16px rgba(57,255,20,0.1)":"none"}}
           onMouseEnter={e=>{if(active!==item.id){e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="#fff";}}}
-          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
+          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}> 
           <span style={{fontSize:17}}>{item.icon}</span>{item.label}
         </button>
       ))}
@@ -625,8 +681,8 @@ function Sidebar({active,onNav,isAdmin,onLogout}){
   );
 }
 
-// ── LOGIN SCREEN ─────────────────────────────────────────────────────────────
-const ADMIN_PASS = "Robbinsvillle"; // three l's as requested
+/* ── LOGIN SCREEN ────────────────────────────────────────────────────────── */
+const ADMIN_PASS = "Robbinsvillle";
 
 function LoginScreen({onLogin}){
   const [pw,setPw]=useState("");
@@ -635,29 +691,17 @@ function LoginScreen({onLogin}){
   const [hint,setHint]=useState("");
 
   function attempt(){
-    if(pw === ADMIN_PASS){
-      onLogin("admin");
-    } else if(pw.trim() === ""){
-      setHint("Enter a password or choose Guest access below.");
-      triggerShake();
-    } else {
-      onLogin("guest");
-    }
-  }
-
-  function triggerShake(){
-    setShake(true);
-    setTimeout(()=>setShake(false),500);
+    if(pw === ADMIN_PASS){ onLogin("admin"); }
+    else if(pw.trim() === ""){setHint("Enter a password or choose Guest access below.");setShake(true);setTimeout(()=>setShake(false),500);}
+    else { onLogin("guest"); }
   }
 
   return(
     <div style={{position:"fixed",inset:0,display:"flex",alignItems:"center",justifyContent:"center",
       background:"radial-gradient(ellipse 70% 60% at 50% 40%,rgba(57,255,20,0.07) 0%,transparent 70%),radial-gradient(ellipse 50% 50% at 30% 70%,rgba(0,207,255,0.08) 0%,transparent 70%),#060609",
       zIndex:100}}>
-      <Particles/>
-      <FloatingCode/>
+      <Particles/><FloatingCode/>
       <div style={{position:"relative",zIndex:2,width:"100%",maxWidth:420,padding:"0 24px",animation:"fadeUp .6s ease both"}}>
-        {/* LOGO */}
         <div style={{textAlign:"center",marginBottom:40}}>
           <div style={{display:"inline-flex",alignItems:"center",justifyContent:"center",
             width:72,height:72,borderRadius:"50%",marginBottom:16,
@@ -670,92 +714,108 @@ function LoginScreen({onLogin}){
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)",letterSpacing:3}}>ROBBINSVILLE</div>
           <div style={{width:60,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"14px auto 0",borderRadius:99}}/>
         </div>
-
-        {/* CARD */}
         <Glass style={{padding:32,borderColor:"rgba(57,255,20,0.15)",
           boxShadow:"0 0 60px rgba(57,255,20,0.08),0 20px 60px rgba(0,0,0,0.6)",
-          animation:shake?"none":"",
-          ...(shake?{animation:"shakeCard .5s ease"}:{})}}>
-          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#fff",
-            textAlign:"center",marginBottom:6,letterSpacing:1}}>WELCOME BACK</h2>
-          <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.4)",
-            textAlign:"center",marginBottom:28}}>Enter the admin password for full access</p>
-
-          {/* PASSWORD INPUT */}
+          animation:shake?"shakeCard .5s ease":"none"}}>
+          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#fff",textAlign:"center",marginBottom:6,letterSpacing:1}}>WELCOME BACK</h2>
+          <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.4)",textAlign:"center",marginBottom:28}}>Enter the admin password for full access</p>
           <div style={{marginBottom:8,position:"relative"}}>
-            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,
-              color:"rgba(255,255,255,0.4)",marginBottom:8,letterSpacing:1.5}}>PASSWORD</label>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:8,letterSpacing:1.5}}>PASSWORD</label>
             <div style={{position:"relative"}}>
-              <input
-                value={pw}
-                onChange={e=>{setPw(e.target.value);setHint("");}}
-                onKeyDown={e=>e.key==="Enter"&&attempt()}
-                type={show?"text":"password"}
+              <input value={pw} onChange={e=>{setPw(e.target.value);setHint("");}}
+                onKeyDown={e=>e.key==="Enter"&&attempt()} type={show?"text":"password"}
                 placeholder="Enter admin password..."
-                style={{width:"100%",background:"rgba(255,255,255,0.06)",
-                  border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,
-                  padding:"13px 44px 13px 16px",color:"#fff",
-                  fontFamily:"'Fira Code',monospace",fontSize:14,
+                style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,
+                  padding:"13px 44px 13px 16px",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:14,
                   outline:"none",boxSizing:"border-box",transition:"border-color .2s",letterSpacing:pw&&!show?3:1}}
                 onFocus={e=>e.target.style.borderColor="#39ff14"}
                 onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.15)"}/>
               <button onClick={()=>setShow(!show)} style={{position:"absolute",right:12,top:"50%",
                 transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",
-                color:"rgba(255,255,255,0.4)",fontSize:16,padding:0}}>
-                {show?"🙈":"👁️"}
-              </button>
+                color:"rgba(255,255,255,0.4)",fontSize:16,padding:0}}>{show?"🙈":"👁️"}</button>
             </div>
             {hint&&<p style={{color:"#ff2d78",fontSize:11,marginTop:6,fontFamily:"'Fira Code',monospace"}}>{hint}</p>}
           </div>
-
-          {/* ADMIN LOGIN BTN */}
-          <button onClick={attempt} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",
-            cursor:"pointer",background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+          <button onClick={attempt} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",cursor:"pointer",
+            background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
             fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,letterSpacing:1.5,
-            marginTop:18,transition:"transform .2s,opacity .2s",
-            boxShadow:"0 0 24px #39ff1444"}}
+            marginTop:18,transition:"transform .2s,opacity .2s",boxShadow:"0 0 24px #39ff1444"}}
             onMouseEnter={e=>{e.target.style.transform="scale(1.02)";e.target.style.opacity=".92";}}
             onMouseLeave={e=>{e.target.style.transform="none";e.target.style.opacity="1";}}>
             ENTER DOJO ⚡
           </button>
-
-          {/* DIVIDER */}
           <div style={{display:"flex",alignItems:"center",gap:12,margin:"20px 0"}}>
             <div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/>
             <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.25)"}}>OR</span>
             <div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/>
           </div>
-
-          {/* GUEST BTN */}
           <button onClick={()=>onLogin("guest")} style={{width:"100%",padding:"12px",borderRadius:10,
             border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",
             background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.6)",
             fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,transition:"all .2s"}}
-            onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="#fff";e.currentTarget.style.borderColor="rgba(255,255,255,0.3)";}}
-            onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.04)";e.currentTarget.style.color="rgba(255,255,255,0.6)";e.currentTarget.style.borderColor="rgba(255,255,255,0.15)";}}>
+            onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="#fff";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.04)";e.currentTarget.style.color="rgba(255,255,255,0.6)";}}>
             👀 Continue as Guest (View Only)
           </button>
-
-          <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.2)",
-            textAlign:"center",marginTop:18,lineHeight:1.6}}>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.2)",textAlign:"center",marginTop:18,lineHeight:1.6}}>
             Guests can view leaderboards & riddles.<br/>Admin access required to enter scores.
           </p>
         </Glass>
       </div>
-      <style>{`@keyframes shakeCard{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}`}</style>
     </div>
   );
 }
 
-// ── APP ──────────────────────────────────────────────────────────────────────
+/* ── LOADING SCREEN ──────────────────────────────────────────────────────── */
+function LoadingScreen(){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+      background:"#060609",zIndex:200,gap:16}}>
+      <div style={{fontSize:48}}>🥷</div>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:14,color:"#39ff14",letterSpacing:2,
+        textShadow:"0 0 16px #39ff14aa"}}>LOADING DOJO...</div>
+      <div style={{width:40,height:40,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",
+        borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+    </div>
+  );
+}
+
+/* ── APP ─────────────────────────────────────────────────────────────────── */
 function App(){
-  const [role,setRole]=useState(null); // null=login, "admin", "guest"
+  const [role,setRole]=useState(null);
   const [tab,setTab]=useState("home");
-  const [scores,setScores]=useState(loadScores);
+  const [scores,setScores]=useState({});
+  const [riddlesData,setRiddlesData]=useState({});
   const [toast,setToast]=useState(null);
+  const [loading,setLoading]=useState(true);
   const isAdmin = role==="admin";
 
-  if(!role) return <LoginScreen onLogin={r=>setRole(r)}/>;
+  // load from cross-device storage on mount
+  useEffect(()=>{
+    async function loadData(){
+      const s=await storageGet("cn_scores");
+      const r=await storageGet("cn_riddles");
+      if(s)setScores(s);
+      if(r)setRiddlesData(r);
+      setLoading(false);
+    }
+    loadData();
+  },[]);
+
+  // poll for updates every 30s (so other devices see changes)
+  useEffect(()=>{
+    if(!role)return;
+    const interval=setInterval(async()=>{
+      const s=await storageGet("cn_scores");
+      const r=await storageGet("cn_riddles");
+      if(s)setScores(s);
+      if(r)setRiddlesData(r);
+    },30000);
+    return()=>clearInterval(interval);
+  },[role]);
+
+  if(loading)return <LoadingScreen/>;
+  if(!role)return <LoginScreen onLogin={r=>setRole(r)}/>;
 
   return(
     <>
@@ -764,9 +824,9 @@ function App(){
       <div style={{display:"flex",height:"100vh",position:"relative",zIndex:1}}>
         <Sidebar active={tab} onNav={setTab} isAdmin={isAdmin} onLogout={()=>setRole(null)}/>
         <div key={tab} style={{flex:1,overflowY:"auto",animation:"fadeUp .35s ease both"}}>
-          {tab==="home"&&<HomeTab onNav={setTab}/>}
+          {tab==="home"&&<HomeTab onNav={setTab} scores={scores}/>}
           {tab==="leaderboards"&&<LeaderboardsTab scores={scores} setScores={setScores} setToast={setToast} isAdmin={isAdmin}/>}
-          {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin}/>}
+          {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin} riddlesData={riddlesData} setRiddlesData={setRiddlesData}/>}
         </div>
       </div>
       {toast&&<Toast msg={toast} onDone={()=>setToast(null)}/>}
