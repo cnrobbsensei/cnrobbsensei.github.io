@@ -11,9 +11,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 
-<!-- Firebase SDKs (compat version — works as global scripts, no bundler needed) -->
+<!-- Firebase Realtime Database (compat) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -26,6 +26,7 @@ input::placeholder,textarea::placeholder{color:rgba(255,255,255,0.2);}
 input[type=number]{-moz-appearance:textfield;}
 input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
 select option{background:#0a0a0f;color:#fff;}
+
 @keyframes fadeSlideLeft{from{opacity:0;transform:translateX(-30px)}to{opacity:1;transform:translateX(0)}}
 @keyframes fadeSlideRight{from{opacity:0;transform:translateX(30px)}to{opacity:1;transform:translateX(0)}}
 @keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
@@ -34,91 +35,117 @@ select option{background:#0a0a0f;color:#fff;}
 @keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 @keyframes shakeCard{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
 </style>
 </head>
 <body>
 <div id="root"></div>
 
 <script>
-// ── Firebase init (outside Babel so it runs first) ──────────────
+// ── Firebase init ───────────────────────────────────────────────
 const firebaseConfig = {
   apiKey:            "AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
   authDomain:        "githubpat-2d39d.firebaseapp.com",
   projectId:         "githubpat-2d39d",
   storageBucket:     "githubpat-2d39d.firebasestorage.app",
   messagingSenderId: "375553339098",
-  appId:             "1:375553339098:web:729bb04215f50217937fe3"
+  appId:             "1:375553339098:web:729bb04215f50217937fe3",
+  databaseURL:       "https://githubpat-2d39d-default-rtdb.firebaseio.com"
 };
 firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
+const db = firebase.database();
 
-// ── Firestore helpers ───────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+//  REALTIME DATABASE HELPERS
 //
-// DATA SHAPE IN FIRESTORE:
+//  DATA SHAPE:
 //
 //  leaderboards/
-//    week_{n}/
-//      entries/          <- subcollection
-//        {autoId}: { name, points, date, week }
+//    week_1/
+//      entries/
+//        {pushId}: { name, points, date, week }
 //
 //  riddles/
-//    week_{n}/
-//        fields: { text, answer }
-//      submissions/      <- subcollection
-//        {autoId}: { name, answer, ts }
+//    week_1/
+//      text: "..."
+//      answer: "..."
+//      submissions/
+//        {pushId}: { name, answer, ts }
 //
+// ══════════════════════════════════════════════════════════════════
 
 window.fbLeaderboard = {
   // Returns array of {id, name, points, date, week}
   async getAll() {
-    const weeks = await db.collection("leaderboards").get();
+    const snap = await db.ref("leaderboards").once("value");
+    const val = snap.val() || {};
     const all = [];
-    for (const wDoc of weeks.docs) {
-      const entries = await db.collection("leaderboards").doc(wDoc.id).collection("entries").get();
-      entries.forEach(e => all.push({ id: e.id, ...e.data() }));
+    for (const weekKey of Object.keys(val)) {
+      const week = parseInt(weekKey.replace("week_", ""));
+      const entries = val[weekKey].entries || {};
+      for (const [id, entry] of Object.entries(entries)) {
+        all.push({ id, week, ...entry });
+      }
     }
     return all;
   },
+
   async addEntry(week, name, points, date) {
-    return db.collection("leaderboards").doc(`week_${week}`)
-             .collection("entries").add({ week, name, points, date });
+    const ref = db.ref(`leaderboards/week_${week}/entries`).push();
+    await ref.set({ week, name, points, date });
+    return { id: ref.key };
   },
+
   async deleteEntry(week, entryId) {
-    return db.collection("leaderboards").doc(`week_${week}`)
-             .collection("entries").doc(entryId).delete();
+    await db.ref(`leaderboards/week_${week}/entries/${entryId}`).remove();
   }
 };
 
 window.fbRiddles = {
-  // Returns { week_1: {text, answer, entries:[{id,name,answer,ts}]}, ... }
+  // Returns { 1: {text, answer, entries:[{id,name,answer,ts}]}, ... }
   async getAll() {
-    const weeks = await db.collection("riddles").get();
+    const snap = await db.ref("riddles").once("value");
+    const val = snap.val() || {};
     const map = {};
-    for (const wDoc of weeks.docs) {
-      const wNum = parseInt(wDoc.id.replace("week_",""));
-      const data = wDoc.data();
-      const subs = await db.collection("riddles").doc(wDoc.id).collection("submissions").get();
+    for (const weekKey of Object.keys(val)) {
+      const wNum = parseInt(weekKey.replace("week_", ""));
+      const wData = val[weekKey];
       const entries = [];
-      subs.forEach(s => entries.push({ id: s.id, ...s.data() }));
-      map[wNum] = { text: data.text || "", answer: data.answer || "", entries };
+      const subs = wData.submissions || {};
+      for (const [id, sub] of Object.entries(subs)) {
+        entries.push({ id, ...sub });
+      }
+      map[wNum] = {
+        text: wData.text || "",
+        answer: wData.answer || "",
+        entries
+      };
     }
     return map;
   },
+
   async setRiddle(week, text, answer) {
-    return db.collection("riddles").doc(`week_${week}`).set({ text, answer }, { merge: true });
+    await db.ref(`riddles/week_${week}`).update({ text, answer });
   },
+
   async addSubmission(week, name, answer, ts) {
     // One submission per name per week — overwrite if exists
-    const col = db.collection("riddles").doc(`week_${week}`).collection("submissions");
-    const existing = await col.where("name","==",name).get();
-    if (!existing.empty) {
-      return existing.docs[0].ref.update({ answer, ts });
+    const snap = await db.ref(`riddles/week_${week}/submissions`)
+      .orderByChild("name").equalTo(name).once("value");
+    const val = snap.val();
+    if (val) {
+      const existingKey = Object.keys(val)[0];
+      await db.ref(`riddles/week_${week}/submissions/${existingKey}`).update({ answer, ts });
+      return { id: existingKey };
+    } else {
+      const ref = db.ref(`riddles/week_${week}/submissions`).push();
+      await ref.set({ name, answer, ts });
+      return { id: ref.key };
     }
-    return col.add({ name, answer, ts });
   },
+
   async deleteSubmission(week, submissionId) {
-    return db.collection("riddles").doc(`week_${week}`)
-             .collection("submissions").doc(submissionId).delete();
+    await db.ref(`riddles/week_${week}/submissions/${submissionId}`).remove();
   }
 };
 </script>
@@ -153,7 +180,6 @@ function todayStr(){
 // ══════════════════════════════════════════════════════════════════
 //  📊  LEADERBOARD LOGIC
 // ══════════════════════════════════════════════════════════════════
-// Group raw entries: same ninja + same week + same day → sum points
 function groupEntries(entries){
   const map = {};
   for(const e of entries){
@@ -178,12 +204,13 @@ function calcBoard(groupedForWeek){
 //  🎨  UI PRIMITIVES
 // ══════════════════════════════════════════════════════════════════
 function Particles(){
-  const ref=useRef();
+  const ref = useRef();
   useEffect(()=>{
-    const c=ref.current; if(!c)return;
-    const ctx=c.getContext("2d");
-    c.width=c.offsetWidth; c.height=c.offsetHeight;
-    const ps=Array.from({length:55},()=>({
+    const c = ref.current; if(!c) return;
+    const ctx = c.getContext("2d");
+    const resize = () => { c.width = c.offsetWidth; c.height = c.offsetHeight; };
+    resize();
+    const ps = Array.from({length:55},()=>({
       x:Math.random()*c.width, y:Math.random()*c.height,
       r:Math.random()*1.8+0.4,
       dx:(Math.random()-.5)*.35, dy:(Math.random()-.5)*.35,
@@ -195,31 +222,39 @@ function Particles(){
       ctx.clearRect(0,0,c.width,c.height);
       ps.forEach(p=>{
         ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
-        ctx.fillStyle=p.color; ctx.globalAlpha=p.a;
-        ctx.shadowBlur=8; ctx.shadowColor=p.color; ctx.fill();
-        p.x+=p.dx; p.y+=p.dy;
+        ctx.fillStyle = p.color; ctx.globalAlpha = p.a;
+        ctx.shadowBlur = 8; ctx.shadowColor = p.color; ctx.fill();
+        p.x += p.dx; p.y += p.dy;
         if(p.x<0||p.x>c.width) p.dx*=-1;
         if(p.y<0||p.y>c.height) p.dy*=-1;
       });
-      ctx.globalAlpha=1; raf=requestAnimationFrame(draw);
+      ctx.globalAlpha = 1;
+      raf = requestAnimationFrame(draw);
     }
     draw();
-    return()=>cancelAnimationFrame(raf);
+    return () => cancelAnimationFrame(raf);
   },[]);
   return <canvas ref={ref} style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}/>;
 }
 
-const CODE_LINES=["const ninja = new Coder();","while(learning) { level++; }","function achieve(goal) {","  return skill * effort;","}","if (rank === 1) celebrate();","ninja.train(['python','js']);","const points = score * combo;","export default Ninja;","// keep coding! 🥷"];
+const CODE_LINES = [
+  "const ninja = new Coder();","while(learning) { level++; }",
+  "function achieve(goal) {","  return skill * effort;","}",
+  "if (rank === 1) celebrate();","ninja.train(['python','js']);",
+  "const points = score * combo;","export default Ninja;","// keep coding! 🥷"
+];
 function FloatingCode(){
   return(
     <div style={{position:"absolute",inset:0,overflow:"hidden",pointerEvents:"none"}}>
       {CODE_LINES.map((line,i)=>(
-        <div key={i} style={{position:"absolute",left:`${8+i*8}%`,bottom:"-2em",
+        <div key={i} style={{
+          position:"absolute",left:`${8+i*8}%`,bottom:"-2em",
           fontFamily:"'Fira Code',monospace",fontSize:"11px",
           color:i%3===0?"#39ff14":i%3===1?"#00cfff":"#ff2d78",
           opacity:.10+(i%4)*.05,
           animation:`floatUp ${9+i*.8}s linear infinite`,
-          animationDelay:`${i*1.1}s`,whiteSpace:"nowrap"}}>{line}</div>
+          animationDelay:`${i*1.1}s`,whiteSpace:"nowrap"
+        }}>{line}</div>
       ))}
     </div>
   );
@@ -232,15 +267,18 @@ function Glass({children,style={},onMouseEnter,onMouseLeave}){
       backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
       border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
       boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",
-      ...style}}>{children}</div>
+      ...style
+    }}>{children}</div>
   );
 }
 
 function RankBadge({rank}){
-  const cfg={1:{bg:"linear-gradient(135deg,#ffd700,#ff8c00)",e:"👑"},
-             2:{bg:"linear-gradient(135deg,#c0c0c0,#808080)",e:"🥈"},
-             3:{bg:"linear-gradient(135deg,#cd7f32,#8b4513)",e:"🥉"}};
-  const c=cfg[rank]||{bg:"rgba(255,255,255,0.1)",e:null};
+  const cfg = {
+    1:{bg:"linear-gradient(135deg,#ffd700,#ff8c00)",e:"👑"},
+    2:{bg:"linear-gradient(135deg,#c0c0c0,#808080)",e:"🥈"},
+    3:{bg:"linear-gradient(135deg,#cd7f32,#8b4513)",e:"🥉"}
+  };
+  const c = cfg[rank]||{bg:"rgba(255,255,255,0.1)",e:null};
   return(
     <div style={{width:36,height:36,borderRadius:"50%",background:c.bg,flexShrink:0,
       display:"flex",alignItems:"center",justifyContent:"center",
@@ -251,7 +289,7 @@ function RankBadge({rank}){
 }
 
 function Toast({msg,color="#39ff14",onDone}){
-  useEffect(()=>{const t=setTimeout(onDone,3500);return()=>clearTimeout(t);},[]);
+  useEffect(()=>{ const t = setTimeout(onDone,3500); return()=>clearTimeout(t); },[]);
   return(
     <div style={{position:"fixed",bottom:32,right:32,zIndex:9999,
       background:"rgba(10,10,20,0.96)",border:`1px solid ${color}`,borderRadius:12,
@@ -268,10 +306,12 @@ function Spinner(){
 }
 
 function inputStyle(err){
-  return {width:"100%",background:"rgba(255,255,255,0.06)",
+  return {
+    width:"100%",background:"rgba(255,255,255,0.06)",
     border:`1px solid ${err?"#ff2d78":"rgba(255,255,255,0.15)"}`,borderRadius:10,
     padding:"12px 16px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,
-    outline:"none",boxSizing:"border-box",transition:"border-color .2s"};
+    outline:"none",boxSizing:"border-box",transition:"border-color .2s"
+  };
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -286,7 +326,7 @@ function HomeTab({onNav, allEntries}){
   const allNinjas = new Set(allEntries.map(e=>e.name));
   const topScore = grouped.reduce((m,e)=>e.points>m?e.points:m,0);
 
-  const statCards=[
+  const statCards = [
     {icon:"🥷",label:"Active Ninjas",val:String(allNinjas.size||0),color:"#39ff14"},
     {icon:"🏅",label:"This Week's #1",val:topNinja?topNinja.name:"—",color:"#ffd700"},
     {icon:"💻",label:"Daily Entries",val:String(grouped.length),color:"#00cfff"},
@@ -298,10 +338,13 @@ function HomeTab({onNav, allEntries}){
       <Particles/><FloatingCode/>
       <div style={{position:"relative",zIndex:2,display:"grid",gridTemplateColumns:"1fr 1fr",
         gap:48,padding:"48px",width:"100%",alignItems:"center"}}>
+        {/* LEFT */}
         <div style={{animation:"fadeSlideLeft .7s ease both"}}>
           <div style={{display:"inline-block",background:"rgba(57,255,20,0.1)",
             border:"1px solid #39ff1444",borderRadius:99,padding:"6px 16px",marginBottom:24}}>
-            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"#39ff14",letterSpacing:2}}>⚡ LIVE COMPETITION DASHBOARD</span>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"#39ff14",letterSpacing:2}}>
+              ⚡ LIVE COMPETITION DASHBOARD
+            </span>
           </div>
           <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(26px,3.2vw,50px)",fontWeight:900,lineHeight:1.15,marginBottom:16,
             background:"linear-gradient(135deg,#fff 0%,#00cfff 50%,#39ff14 100%)",
@@ -326,6 +369,7 @@ function HomeTab({onNav, allEntries}){
             VIEW LEADERBOARDS →
           </button>
         </div>
+        {/* RIGHT */}
         <div style={{animation:"fadeSlideRight .7s ease both"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
             {statCards.map((card,i)=>(
@@ -377,13 +421,17 @@ function LeaderboardView({allEntries}){
           style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",
             borderRadius:8,color:"#fff",padding:"8px 14px",fontFamily:"'Fira Code',monospace",fontSize:12,cursor:"pointer"}}>
           {Array.from({length:totalWeeks},(_,i)=>i+1).map(w=>(
-            <option key={w} value={w} style={{background:"#0a0a0f"}}>{getWeekLabel(w)}{w===getCurrentWeek()?" ← Current":""}</option>
+            <option key={w} value={w} style={{background:"#0a0a0f"}}>
+              {getWeekLabel(w)}{w===getCurrentWeek()?" ← Current":""}
+            </option>
           ))}
         </select>
       </div>
       {board.length===0?(
         <Glass style={{padding:40,textAlign:"center"}}>
-          <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>No scores yet for this week. Be the first! 🥷</p>
+          <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>
+            No scores yet for this week. Be the first! 🥷
+          </p>
         </Glass>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
@@ -393,8 +441,8 @@ function LeaderboardView({allEntries}){
             <span>RANK</span><span>NINJA</span><span style={{textAlign:"right"}}>TOTAL</span><span style={{paddingLeft:16}}>DAILY BREAKDOWN</span>
           </div>
           {board.map((ninja,i)=>{
-            const rank=i+1;
-            const gc=rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":"transparent";
+            const rank = i+1;
+            const gc = rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":"transparent";
             return(
               <Glass key={ninja.name} style={{padding:"14px 18px",
                 borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.08)",
@@ -452,20 +500,20 @@ function EnterScores({allEntries, setAllEntries, setToast}){
   const ninjaRank = board.findIndex(n=>n.name.toLowerCase()===name.trim().toLowerCase())+1;
 
   async function submit(){
-    const errs={};
-    if(!name.trim()) errs.name="Name is required";
-    const p=Number(pts);
-    if(!pts||isNaN(p)) errs.pts="Must be a number";
-    else if(p<0) errs.pts="No negative points!";
+    const errs = {};
+    if(!name.trim()) errs.name = "Name is required";
+    const p = Number(pts);
+    if(!pts||isNaN(p)) errs.pts = "Must be a number";
+    else if(p<0) errs.pts = "No negative points!";
     if(Object.keys(errs).length){ setErrors(errs); return; }
     setErrors({});
     setSaving(true);
     try{
-      const ref = await window.fbLeaderboard.addEntry(cw, name.trim(), p, today);
-      const newEntry = { id: ref.id, week:cw, name:name.trim(), points:p, date:today };
+      const result = await window.fbLeaderboard.addEntry(cw, name.trim(), p, today);
+      const newEntry = { id: result.id, week:cw, name:name.trim(), points:p, date:today };
       setAllEntries(prev => [...prev, newEntry]);
       setPts("");
-      setToast({ msg:`${name.trim()} scored ${p} pts! Saved to Firebase ✅`, color:"#39ff14" });
+      setToast({ msg:`${name.trim()} scored ${p} pts! Saved ✅`, color:"#39ff14" });
     } catch(e){
       setToast({ msg:`Save failed: ${e.message}`, color:"#ff2d78" });
     }
@@ -473,12 +521,10 @@ function EnterScores({allEntries, setAllEntries, setToast}){
   }
 
   async function deleteEntry(entry){
-    // entry here is a grouped entry — delete all raw docs for this ninja+week+date
     setDeleting(entry.date);
     try{
-      // Find all raw entries matching this ninja+week+date
       const rawMatches = allEntries.filter(e =>
-        e.week === cw && e.name.toLowerCase() === entry.name.toLowerCase() && e.date === entry.date
+        e.week===cw && e.name.toLowerCase()===entry.name.toLowerCase() && e.date===entry.date
       );
       await Promise.all(rawMatches.map(e => window.fbLeaderboard.deleteEntry(cw, e.id)));
       setAllEntries(prev => prev.filter(e =>
@@ -496,21 +542,24 @@ function EnterScores({allEntries, setAllEntries, setToast}){
       <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,color:"#fff",marginBottom:6}}>📝 Enter Scores</h2>
       <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:6}}>{getWeekLabel(cw)}</p>
       <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(57,255,20,0.5)",marginBottom:28}}>
-        Same ninja + same day = points accumulate into one row. Different day = separate entry.
+        Same ninja + same day = points accumulate. Different day = separate entry.
       </p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
+        {/* Input */}
         <Glass style={{padding:26}}>
           <div style={{marginBottom:18}}>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:8,letterSpacing:1}}>NINJA NAME</label>
             <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. ShadowByte" style={inputStyle(errors.name)}
-              onFocus={e=>e.target.style.borderColor="#00cfff"} onBlur={e=>e.target.style.borderColor=errors.name?"#ff2d78":"rgba(255,255,255,0.15)"}/>
+              onFocus={e=>e.target.style.borderColor="#00cfff"}
+              onBlur={e=>e.target.style.borderColor=errors.name?"#ff2d78":"rgba(255,255,255,0.15)"}/>
             {errors.name&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.name}</p>}
           </div>
           <div style={{marginBottom:24}}>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:8,letterSpacing:1}}>POINTS SCORED TODAY</label>
             <input value={pts} onChange={e=>setPts(e.target.value)} placeholder="e.g. 850" type="number" min="0"
               style={{...inputStyle(errors.pts),fontFamily:"'Fira Code',monospace",fontSize:16}}
-              onFocus={e=>e.target.style.borderColor="#39ff14"} onBlur={e=>e.target.style.borderColor=errors.pts?"#ff2d78":"rgba(255,255,255,0.15)"}
+              onFocus={e=>e.target.style.borderColor="#39ff14"}
+              onBlur={e=>e.target.style.borderColor=errors.pts?"#ff2d78":"rgba(255,255,255,0.15)"}
               onKeyDown={e=>e.key==="Enter"&&!saving&&submit()}/>
             {errors.pts&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.pts}</p>}
           </div>
@@ -528,6 +577,7 @@ function EnterScores({allEntries, setAllEntries, setToast}){
           </button>
         </Glass>
 
+        {/* Preview */}
         <Glass style={{padding:26,borderColor:ninjaSummary?"#39ff1433":"rgba(255,255,255,0.08)"}}>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#39ff14",marginBottom:18,letterSpacing:1}}>LIVE PREVIEW</h3>
           {ninjaSummary?(
@@ -566,7 +616,9 @@ function EnterScores({allEntries, setAllEntries, setToast}){
           ):(
             <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:200,gap:10}}>
               <div style={{fontSize:38}}>🥷</div>
-              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.3)",textAlign:"center"}}>Enter a ninja name to see their stats</p>
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.3)",textAlign:"center"}}>
+                Enter a ninja name to see their stats
+              </p>
             </div>
           )}
         </Glass>
@@ -611,18 +663,17 @@ function RiddleTab({setToast, isAdmin, riddleMap, setRiddleMap}){
   const allSorted = [...correct, ...wrong];
 
   async function submitAnswer(){
-    const errs={};
-    if(!sName.trim()) errs.name="Name required";
-    if(!sAnswer.trim()) errs.answer="Answer required";
+    const errs = {};
+    if(!sName.trim()) errs.name = "Name required";
+    if(!sAnswer.trim()) errs.answer = "Answer required";
     if(Object.keys(errs).length){ setErrors(errs); return; }
     setErrors({});
     setSaving(true);
     try{
       const ts = Date.now();
-      await window.fbRiddles.addSubmission(week, sName.trim(), sAnswer.trim(), ts);
-      // Update local state
+      const result = await window.fbRiddles.addSubmission(week, sName.trim(), sAnswer.trim(), ts);
       const existingEntries = (weekData.entries||[]).filter(e=>e.name!==sName.trim());
-      const newEntry = { name:sName.trim(), answer:sAnswer.trim(), ts };
+      const newEntry = { id: result.id, name:sName.trim(), answer:sAnswer.trim(), ts };
       setRiddleMap(prev=>({ ...prev, [week]:{ ...weekData, entries:[...existingEntries, newEntry] } }));
       setSName(""); setSAnswer("");
       const c = isCorrect(sAnswer.trim(), weekData.answer);
@@ -650,7 +701,6 @@ function RiddleTab({setToast, isAdmin, riddleMap, setRiddleMap}){
   async function deleteSubmission(entry){
     setSaving(true);
     try{
-      // Find the submission by name in the live riddle map (has id if loaded from Firebase)
       const liveEntry = weekData.entries.find(e=>e.name===entry.name);
       if(liveEntry && liveEntry.id){
         await window.fbRiddles.deleteSubmission(week, liveEntry.id);
@@ -671,14 +721,18 @@ function RiddleTab({setToast, isAdmin, riddleMap, setRiddleMap}){
           style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",
             borderRadius:8,color:"#fff",padding:"8px 14px",fontFamily:"'Fira Code',monospace",fontSize:12,cursor:"pointer"}}>
           {Array.from({length:totalWeeks},(_,i)=>i+1).map(w=>(
-            <option key={w} value={w} style={{background:"#0a0a0f"}}>{getWeekLabel(w)}{w===getCurrentWeek()?" ← Current":""}</option>
+            <option key={w} value={w} style={{background:"#0a0a0f"}}>
+              {getWeekLabel(w)}{w===getCurrentWeek()?" ← Current":""}
+            </option>
           ))}
         </select>
       </div>
 
+      {/* Riddle card */}
       <Glass style={{padding:28,marginBottom:28,borderColor:"#ff2d7833",
         boxShadow:"0 0 40px #ff2d7822,0 8px 32px rgba(0,0,0,0.4)",position:"relative",overflow:"hidden"}}>
-        <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#ff2d78,#00cfff,#39ff14)"}}/>
+        <div style={{position:"absolute",top:0,left:0,right:0,height:3,
+          background:"linear-gradient(90deg,#ff2d78,#00cfff,#39ff14)"}}/>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>RIDDLE #{week}</span>
           {isAdmin&&(
@@ -716,10 +770,11 @@ function RiddleTab({setToast, isAdmin, riddleMap, setRiddleMap}){
       </Glass>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
+        {/* Submit answer */}
         <Glass style={{padding:24}}>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#ff2d78",marginBottom:18,letterSpacing:1}}>SUBMIT YOUR ANSWER</h3>
           <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",marginBottom:16,lineHeight:1.6}}>
-            Already answered? Submit again to update — your latest answer replaces your previous one.
+            Already answered? Submit again to update — your latest answer replaces the old one.
           </p>
           <div style={{marginBottom:14}}>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:8,letterSpacing:1}}>STUDENT NAME</label>
@@ -742,6 +797,7 @@ function RiddleTab({setToast, isAdmin, riddleMap, setRiddleMap}){
           </button>
         </Glass>
 
+        {/* Answers list */}
         <div>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#00cfff",marginBottom:14,letterSpacing:1}}>
             STUDENT ANSWERS ({allSorted.length})
@@ -828,12 +884,12 @@ function LeaderboardsTab({allEntries, setAllEntries, setToast, isAdmin}){
 // ══════════════════════════════════════════════════════════════════
 //  🗂️  SIDEBAR
 // ══════════════════════════════════════════════════════════════════
-const NAV=[
-  {id:"home",icon:"🏠",label:"Home"},
+const NAV = [
+  {id:"home",    icon:"🏠",label:"Home"},
   {id:"leaderboards",icon:"🏆",label:"Leaderboards"},
-  {id:"riddle",icon:"🧩",label:"Riddle of the Week"}
+  {id:"riddle",  icon:"🧩",label:"Riddle of the Week"}
 ];
-function Sidebar({active,onNav,isAdmin,onLogout}){
+function Sidebar({active, onNav, isAdmin, onLogout}){
   return(
     <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",
       padding:"22px 14px",gap:6,background:"rgba(0,0,0,0.35)",
@@ -885,10 +941,10 @@ function Sidebar({active,onNav,isAdmin,onLogout}){
 //  🔑  LOGIN SCREEN
 // ══════════════════════════════════════════════════════════════════
 function LoginScreen({onLogin}){
-  const [pw,setPw]=useState("");
-  const [show,setShow]=useState(false);
-  const [shake,setShake]=useState(false);
-  const [hint,setHint]=useState("");
+  const [pw,setPw] = useState("");
+  const [show,setShow] = useState(false);
+  const [shake,setShake] = useState(false);
+  const [hint,setHint] = useState("");
 
   function attempt(){
     if(pw===ADMIN_PASS){ onLogin("admin"); }
@@ -925,7 +981,9 @@ function LoginScreen({onLogin}){
                 onFocus={e=>e.target.style.borderColor="#39ff14"}
                 onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.15)"}/>
               <button onClick={()=>setShow(!show)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",
-                background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontSize:16,padding:0}}>{show?"🙈":"👁️"}</button>
+                background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontSize:16,padding:0}}>
+                {show?"🙈":"👁️"}
+              </button>
             </div>
             {hint&&<p style={{color:"#ff2d78",fontSize:11,marginTop:6,fontFamily:"'Fira Code',monospace"}}>{hint}</p>}
           </div>
@@ -966,7 +1024,8 @@ function LoadingScreen({status}){
       background:"#060609",zIndex:200,gap:16}}>
       <div style={{fontSize:48}}>🥷</div>
       <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:14,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
-      <div style={{width:40,height:40,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{width:40,height:40,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",
+        borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
       <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
     </div>
   );
@@ -976,27 +1035,27 @@ function LoadingScreen({status}){
 //  🚀  APP ROOT
 // ══════════════════════════════════════════════════════════════════
 function App(){
-  const [role,setRole]=useState(null);
-  const [tab,setTab]=useState("home");
-  const [allEntries,setAllEntries]=useState([]);
-  const [riddleMap,setRiddleMap]=useState({});
-  const [toast,setToast]=useState(null);
-  const [loading,setLoading]=useState(true);
-  const [loadStatus,setLoadStatus]=useState("Connecting to Firebase...");
-  const isAdmin=role==="admin";
+  const [role,    setRole]    = useState(null);
+  const [tab,     setTab]     = useState("home");
+  const [allEntries,  setAllEntries]  = useState([]);
+  const [riddleMap,   setRiddleMap]   = useState({});
+  const [toast,   setToast]   = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [loadStatus, setLoadStatus] = useState("Connecting to Firebase...");
+  const isAdmin = role==="admin";
 
   async function loadData(){
     setLoadStatus("Loading leaderboard...");
     try{
       const entries = await window.fbLeaderboard.getAll();
       setAllEntries(entries);
-    } catch(e){ console.warn("leaderboard load error",e); }
+    } catch(e){ console.warn("leaderboard load error", e); }
 
     setLoadStatus("Loading riddles...");
     try{
       const map = await window.fbRiddles.getAll();
       setRiddleMap(map);
-    } catch(e){ console.warn("riddle load error",e); }
+    } catch(e){ console.warn("riddle load error", e); }
 
     setLoading(false);
   }
@@ -1007,11 +1066,11 @@ function App(){
   useEffect(()=>{
     if(!role) return;
     const iv = setInterval(loadData, 60000);
-    return()=>clearInterval(iv);
+    return () => clearInterval(iv);
   },[role]);
 
   if(loading) return <LoadingScreen status={loadStatus}/>;
-  if(!role) return <LoginScreen onLogin={r=>setRole(r)}/>;
+  if(!role)   return <LoginScreen onLogin={r=>setRole(r)}/>;
 
   return(
     <>
@@ -1020,9 +1079,9 @@ function App(){
       <div style={{display:"flex",height:"100vh",position:"relative",zIndex:1}}>
         <Sidebar active={tab} onNav={setTab} isAdmin={isAdmin} onLogout={()=>setRole(null)}/>
         <div key={tab} style={{flex:1,overflowY:"auto",animation:"fadeUp .35s ease both"}}>
-          {tab==="home"&&<HomeTab onNav={setTab} allEntries={allEntries}/>}
-          {tab==="leaderboards"&&<LeaderboardsTab allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast} isAdmin={isAdmin}/>}
-          {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>}
+          {tab==="home"        && <HomeTab onNav={setTab} allEntries={allEntries}/>}
+          {tab==="leaderboards"&& <LeaderboardsTab allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast} isAdmin={isAdmin}/>}
+          {tab==="riddle"      && <RiddleTab setToast={setToast} isAdmin={isAdmin} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>}
         </div>
       </div>
       {toast&&<Toast msg={toast.msg} color={toast.color||"#39ff14"} onDone={()=>setToast(null)}/>}
