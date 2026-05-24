@@ -36,41 +36,183 @@ select option{background:#0a0a0f;color:#fff;}
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-/* ── STORAGE (cross-device via window.storage API) ─────────────────────────── */
-async function storageGet(key){
-  try{const r=await window.storage.get(key,true);return r?JSON.parse(r.value):null;}
-  catch{return null;}
-}
-async function storageSet(key,val){
-  try{await window.storage.set(key,JSON.stringify(val),true);}
-  catch(e){console.error("storage set failed",e);}
-}
+// ══════════════════════════════════════════════════════════════════
+//  ⚙️  GITHUB CONFIG — fill these in before deploying
+// ══════════════════════════════════════════════════════════════════
+const GH_USER   = "cnrobbsensei";   // e.g. "johnsmith"
+const GH_REPO   = "cnrobbsensei.github.io";         // e.g. "code-ninjas-robbinsville"
+const GH_TOKEN  = "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"; // ghp_xxxxxxxxxxxx
+const ADMIN_PASS = "Robbinsvillle";          // three l's
 
-/* ── WEEK UTILS ──────────────────────────────────────────────────────────────*/
+const RAW_BASE = `https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/main`;
+const API_BASE = `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents`;
+
+// ══════════════════════════════════════════════════════════════════
+//  📅  WEEK UTILS
+// ══════════════════════════════════════════════════════════════════
 const WEEK_START = new Date("2026-05-13T00:00:00");
 function getCurrentWeek(){
   const diff = new Date() - WEEK_START;
-  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
+  return diff < 0 ? 1 : Math.floor(diff / (7*24*60*60*1000)) + 1;
 }
 function getWeekLabel(n){
-  const s = new Date(WEEK_START.getTime()+(n-1)*7*24*60*60*1000);
-  const e = new Date(s.getTime()+6*24*60*60*1000);
+  const s = new Date(WEEK_START.getTime() + (n-1)*7*24*60*60*1000);
+  const e = new Date(s.getTime() + 6*24*60*60*1000);
   const fmt = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
   return `Week ${n} (${fmt(s)} – ${fmt(e)})`;
 }
+function todayStr(){ return new Date().toISOString().slice(0,10); }
 
-/* ── LEADERBOARD CALC ─────────────────────────────────────────────────────────*/
-function calcBoard(entries=[]){
-  const map={};
-  entries.forEach(e=>{if(!map[e.name])map[e.name]=[];map[e.name].push(e.points);});
-  return Object.entries(map).map(([name,pts])=>{
-    const sorted=[...pts].sort((a,b)=>b-a);
-    const top3=sorted.slice(0,3);
-    return{name,total:top3.reduce((s,v)=>s+v,0),entries:pts.length,top3,all:sorted};
-  }).sort((a,b)=>b.total-a.total);
+// ══════════════════════════════════════════════════════════════════
+//  📄  TXT PARSERS & SERIALISERS
+// ══════════════════════════════════════════════════════════════════
+
+// leaderboard.txt format:
+// Week #  | Ninja Name      | Points Scored | Date
+// --------|-----------------|---------------|----------
+// 1       | ShadowByte      | 320           | 2026-05-14
+
+function parseLeaderboard(txt){
+  const lines = txt.split("\n").map(l=>l.trim()).filter(l=>l && !l.startsWith("Week #") && !l.startsWith("---") && !l.startsWith("//"));
+  const entries = [];
+  for(const line of lines){
+    const parts = line.split("|").map(p=>p.trim());
+    if(parts.length < 4) continue;
+    const week = parseInt(parts[0]);
+    const name = parts[1];
+    const points = parseInt(parts[2]);
+    const date = parts[3];
+    if(!isNaN(week) && name && !isNaN(points) && date){
+      entries.push({ week, name, points, date });
+    }
+  }
+  return entries;
 }
 
-/* ── PARTICLES ────────────────────────────────────────────────────────────── */
+function serialiseLeaderboard(entries){
+  const header = `Week # | Ninja Name       | Points Scored | Date\n` +
+                 `-------|------------------|---------------|----------\n`;
+  const rows = entries.map(e =>
+    `${String(e.week).padEnd(6)} | ${e.name.padEnd(16)} | ${String(e.points).padEnd(13)} | ${e.date}`
+  ).join("\n");
+  return header + rows;
+}
+
+// riddle.txt format:
+// RIDDLE_WEEK:1
+// RIDDLE_TEXT:I speak without a mouth...
+// RIDDLE_ANSWER:echo
+// ENTRY:Week|Name|Answer|Timestamp
+// ...
+
+function parseRiddles(txt){
+  const lines = txt.split("\n").map(l=>l.trim()).filter(Boolean);
+  const riddleMap = {}; // week -> { text, answer, entries:[{name,answer,ts}] }
+
+  let currentWeek = null;
+  for(const line of lines){
+    if(line.startsWith("RIDDLE_WEEK:")){
+      currentWeek = parseInt(line.replace("RIDDLE_WEEK:","").trim());
+      if(!riddleMap[currentWeek]) riddleMap[currentWeek] = { text:"", answer:"", entries:[] };
+    } else if(line.startsWith("RIDDLE_TEXT:") && currentWeek){
+      riddleMap[currentWeek].text = line.replace("RIDDLE_TEXT:","").trim();
+    } else if(line.startsWith("RIDDLE_ANSWER:") && currentWeek){
+      riddleMap[currentWeek].answer = line.replace("RIDDLE_ANSWER:","").trim().toLowerCase();
+    } else if(line.startsWith("ENTRY:") && currentWeek){
+      const payload = line.replace("ENTRY:","");
+      const parts = payload.split("|");
+      if(parts.length >= 4){
+        const w = parseInt(parts[0]);
+        const name = parts[1];
+        const answer = parts[2];
+        const ts = parseInt(parts[3]);
+        if(!isNaN(w) && name && answer){
+          if(!riddleMap[w]) riddleMap[w] = { text:"", answer:"", entries:[] };
+          riddleMap[w].entries.push({ name, answer, ts: ts||Date.now() });
+        }
+      }
+    }
+  }
+  return riddleMap;
+}
+
+function serialiseRiddles(riddleMap){
+  const weeks = Object.keys(riddleMap).map(Number).sort((a,b)=>a-b);
+  return weeks.map(w => {
+    const rd = riddleMap[w];
+    const header = `RIDDLE_WEEK:${w}\nRIDDLE_TEXT:${rd.text||""}\nRIDDLE_ANSWER:${rd.answer||""}`;
+    const entries = (rd.entries||[]).map(e =>
+      `ENTRY:${w}|${e.name}|${e.answer}|${e.ts}`
+    ).join("\n");
+    return header + (entries ? "\n" + entries : "");
+  }).join("\n\n");
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  🐙  GITHUB API HELPERS
+// ══════════════════════════════════════════════════════════════════
+async function ghRead(filename){
+  const url = `${RAW_BASE}/${filename}?_=${Date.now()}`;
+  const r = await fetch(url);
+  if(!r.ok) return "";
+  return r.text();
+}
+
+async function ghWrite(filename, content, commitMsg){
+  // get current SHA (needed for updates)
+  const metaUrl = `${API_BASE}/${filename}`;
+  const metaR = await fetch(metaUrl, {
+    headers:{ Authorization:`token ${GH_TOKEN}`, Accept:"application/vnd.github.v3+json" }
+  });
+  const meta = await metaR.json();
+  const sha = meta.sha; // undefined if new file
+
+  const body = { message: commitMsg, content: btoa(unescape(encodeURIComponent(content))) };
+  if(sha) body.sha = sha;
+
+  const writeR = await fetch(metaUrl, {
+    method:"PUT",
+    headers:{
+      Authorization:`token ${GH_TOKEN}`,
+      Accept:"application/vnd.github.v3+json",
+      "Content-Type":"application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  if(!writeR.ok){
+    const err = await writeR.json();
+    throw new Error(err.message || "GitHub write failed");
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  📊  LEADERBOARD LOGIC
+// ══════════════════════════════════════════════════════════════════
+// Group entries: same ninja, same week, same day → accumulate points → one row
+function groupEntries(entries){
+  const map = {};
+  for(const e of entries){
+    const key = `${e.week}|${e.name}|${e.date}`;
+    if(!map[key]) map[key] = { week:e.week, name:e.name, date:e.date, points:0 };
+    map[key].points += e.points;
+  }
+  return Object.values(map);
+}
+
+// Build leaderboard for a given week: each ninja's weekly total = sum of their daily totals (no top-3 cap here — you said accumulate all)
+function calcBoard(groupedForWeek){
+  const map = {};
+  for(const e of groupedForWeek){
+    if(!map[e.name]) map[e.name] = { name:e.name, total:0, days:[] };
+    map[e.name].total += e.points;
+    map[e.name].days.push({ date:e.date, points:e.points });
+  }
+  return Object.values(map).sort((a,b)=>b.total-a.total);
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  🎨  UI PRIMITIVES
+// ══════════════════════════════════════════════════════════════════
 function Particles(){
   const ref=useRef();
   useEffect(()=>{
@@ -90,7 +232,7 @@ function Particles(){
       ps.forEach(p=>{
         ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
         ctx.fillStyle=p.color;ctx.globalAlpha=p.a;
-        ctx.shadowBlur=10;ctx.shadowColor=p.color;ctx.fill();
+        ctx.shadowBlur=8;ctx.shadowColor=p.color;ctx.fill();
         p.x+=p.dx;p.y+=p.dy;
         if(p.x<0||p.x>c.width)p.dx*=-1;
         if(p.y<0||p.y>c.height)p.dy*=-1;
@@ -103,7 +245,6 @@ function Particles(){
   return <canvas ref={ref} style={{position:"absolute",inset:0,width:"100%",height:"100%",pointerEvents:"none"}}/>;
 }
 
-/* ── FLOATING CODE ───────────────────────────────────────────────────────── */
 const CODE_LINES=["const ninja = new Coder();","while(learning) { level++; }","function achieve(goal) {","  return skill * effort;","}","if (rank === 1) celebrate();","ninja.train(['python','js']);","const points = score * combo;","export default Ninja;","// keep coding! 🥷"];
 function FloatingCode(){
   return(
@@ -112,16 +253,14 @@ function FloatingCode(){
         <div key={i} style={{position:"absolute",left:`${8+i*8}%`,bottom:"-2em",
           fontFamily:"'Fira Code',monospace",fontSize:"11px",
           color:i%3===0?"#39ff14":i%3===1?"#00cfff":"#ff2d78",
-          opacity:.12+(i%4)*.06,
+          opacity:.10+(i%4)*.05,
           animation:`floatUp ${9+i*.8}s linear infinite`,
-          animationDelay:`${i*1.1}s`,whiteSpace:"nowrap",
-          textShadow:"0 0 8px currentColor"}}>{line}</div>
+          animationDelay:`${i*1.1}s`,whiteSpace:"nowrap"}}>{line}</div>
       ))}
     </div>
   );
 }
 
-/* ── GLASS ───────────────────────────────────────────────────────────────── */
 function Glass({children,style={},onMouseEnter,onMouseLeave}){
   return(
     <div onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
@@ -133,15 +272,13 @@ function Glass({children,style={},onMouseEnter,onMouseLeave}){
   );
 }
 
-/* ── RANK BADGE ──────────────────────────────────────────────────────────── */
 function RankBadge({rank}){
-  const cfg={1:{bg:"linear-gradient(135deg,#ffd700,#ff8c00)",shadow:"#ffd700",e:"👑"},
-             2:{bg:"linear-gradient(135deg,#c0c0c0,#808080)",shadow:"#c0c0c0",e:"🥈"},
-             3:{bg:"linear-gradient(135deg,#cd7f32,#8b4513)",shadow:"#cd7f32",e:"🥉"}};
-  const c=cfg[rank]||{bg:"rgba(255,255,255,0.1)",shadow:"transparent",e:null};
+  const cfg={1:{bg:"linear-gradient(135deg,#ffd700,#ff8c00)",e:"👑"},
+             2:{bg:"linear-gradient(135deg,#c0c0c0,#808080)",e:"🥈"},
+             3:{bg:"linear-gradient(135deg,#cd7f32,#8b4513)",e:"🥉"}};
+  const c=cfg[rank]||{bg:"rgba(255,255,255,0.1)",e:null};
   return(
     <div style={{width:36,height:36,borderRadius:"50%",background:c.bg,flexShrink:0,
-      boxShadow:rank<=3?`0 0 14px ${c.shadow}88`:"none",
       display:"flex",alignItems:"center",justifyContent:"center",
       fontWeight:700,fontSize:rank<=3?15:12,color:rank<=3?"#000":"#999"}}>
       {c.e||`#${rank}`}
@@ -149,36 +286,47 @@ function RankBadge({rank}){
   );
 }
 
-/* ── TOAST ───────────────────────────────────────────────────────────────── */
-function Toast({msg,onDone}){
-  useEffect(()=>{const t=setTimeout(onDone,3000);return()=>clearTimeout(t);},[]);
+function Toast({msg,color="#39ff14",onDone}){
+  useEffect(()=>{const t=setTimeout(onDone,3500);return()=>clearTimeout(t);},[]);
   return(
     <div style={{position:"fixed",bottom:32,right:32,zIndex:9999,
-      background:"rgba(10,10,20,0.95)",border:"1px solid #39ff14",borderRadius:12,
-      padding:"14px 24px",color:"#39ff14",fontFamily:"'Fira Code',monospace",
-      fontWeight:600,fontSize:14,boxShadow:"0 0 24px #39ff1466",
-      animation:"slideIn .3s ease"}}>✅ {msg}</div>
+      background:"rgba(10,10,20,0.96)",border:`1px solid ${color}`,borderRadius:12,
+      padding:"14px 24px",color,fontFamily:"'Fira Code',monospace",
+      fontWeight:600,fontSize:14,boxShadow:`0 0 24px ${color}55`,
+      animation:"slideIn .3s ease",maxWidth:340}}>{msg}</div>
   );
 }
 
-/* ── HOME ──────────────────────────────────────────────────────────────────*/
-function HomeTab({onNav, scores}){
+function Spinner(){
+  return <div style={{width:18,height:18,border:"2px solid rgba(255,255,255,0.2)",borderTop:"2px solid #39ff14",borderRadius:"50%",animation:"spin .8s linear infinite",display:"inline-block"}}/>;
+}
+
+function inputStyle(err){
+  return {width:"100%",background:"rgba(255,255,255,0.06)",
+    border:`1px solid ${err?"#ff2d78":"rgba(255,255,255,0.15)"}`,borderRadius:10,
+    padding:"12px 16px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,
+    outline:"none",boxSizing:"border-box",transition:"border-color .2s"};
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  🏠  HOME TAB
+// ══════════════════════════════════════════════════════════════════
+function HomeTab({onNav, allEntries}){
   const cw = getCurrentWeek();
-  const weekEntries = scores[cw] || [];
-  const board = calcBoard(weekEntries);
+  const grouped = groupEntries(allEntries);
+  const weekGrouped = grouped.filter(e=>e.week===cw);
+  const board = calcBoard(weekGrouped);
   const topNinja = board[0];
 
-  // compute real stats
-  const allNinjas = new Set();
-  Object.values(scores).forEach(wk=>(wk||[]).forEach(e=>allNinjas.add(e.name)));
-  const totalEntries = Object.values(scores).reduce((s,wk)=>s+(wk||[]).length,0);
-  const topScore = Math.max(0,...Object.values(scores).flatMap(wk=>(wk||[]).map(e=>e.points)));
+  const allNinjas = new Set(allEntries.map(e=>e.name));
+  const topScore = grouped.reduce((m,e)=>e.points>m?e.points:m,0);
+  const totalDayEntries = grouped.length;
 
-  const statCards = [
+  const statCards=[
     {icon:"🥷",label:"Active Ninjas",val:String(allNinjas.size||0),color:"#39ff14"},
     {icon:"🏅",label:"This Week's #1",val:topNinja?topNinja.name:"—",color:"#ffd700"},
-    {icon:"💻",label:"Total Entries",val:String(totalEntries),color:"#00cfff"},
-    {icon:"🔥",label:"Top Score",val:topScore>0?`${topScore.toLocaleString()} pts`:"—",color:"#ff2d78"},
+    {icon:"💻",label:"Daily Entries",val:String(totalDayEntries),color:"#00cfff"},
+    {icon:"🔥",label:"Top Day Score",val:topScore>0?`${topScore.toLocaleString()} pts`:"—",color:"#ff2d78"},
   ];
 
   return(
@@ -186,7 +334,6 @@ function HomeTab({onNav, scores}){
       <Particles/><FloatingCode/>
       <div style={{position:"relative",zIndex:2,display:"grid",gridTemplateColumns:"1fr 1fr",
         gap:48,padding:"48px",width:"100%",alignItems:"center"}}>
-        {/* LEFT */}
         <div style={{animation:"fadeSlideLeft .7s ease both"}}>
           <div style={{display:"inline-block",background:"rgba(57,255,20,0.1)",
             border:"1px solid #39ff1444",borderRadius:99,padding:"6px 16px",marginBottom:24}}>
@@ -196,7 +343,7 @@ function HomeTab({onNav, scores}){
             background:"linear-gradient(135deg,#fff 0%,#00cfff 50%,#39ff14 100%)",
             WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>Hi Ninjas! 👋</h1>
           <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:"clamp(13px,1.4vw,18px)",color:"rgba(255,255,255,0.7)",marginBottom:32,lineHeight:1.6}}>
-            This is the official <span style={{color:"#39ff14",fontWeight:700}}>Code Ninjas – Robbinsville</span> website to track your leaderboards!
+            Official <span style={{color:"#39ff14",fontWeight:700}}>Code Ninjas – Robbinsville</span> dashboard — live leaderboards, weekly riddles, and ninja rankings.
           </p>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:40}}>
             {["🏆 Weekly competitions","🎖️ Ninja rankings","🧩 Riddle challenges","⭐ Student achievements"].map((item,i)=>(
@@ -215,7 +362,6 @@ function HomeTab({onNav, scores}){
             VIEW LEADERBOARDS →
           </button>
         </div>
-        {/* RIGHT – live stats from real data */}
         <div style={{animation:"fadeSlideRight .7s ease both"}}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
             {statCards.map((card,i)=>(
@@ -226,7 +372,7 @@ function HomeTab({onNav, scores}){
                 onMouseLeave={e=>{e.currentTarget.style.transform="none";e.currentTarget.style.boxShadow=`0 8px 32px rgba(0,0,0,0.4),0 0 20px ${card.color}22`;}}>
                 <div style={{fontSize:30,marginBottom:8}}>{card.icon}</div>
                 <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:4,letterSpacing:1}}>{card.label.toUpperCase()}</div>
-                <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:18,color:card.color,textShadow:`0 0 12px ${card.color}88`}}>{card.val}</div>
+                <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:18,color:card.color}}>{card.val}</div>
               </Glass>
             ))}
           </div>
@@ -250,12 +396,15 @@ function HomeTab({onNav, scores}){
   );
 }
 
-/* ── LEADERBOARD VIEW ────────────────────────────────────────────────────── */
-function LeaderboardView({scores}){
-  const totalWeeks=getCurrentWeek()+1;
-  const [week,setWeek]=useState(getCurrentWeek());
-  const entries=scores[week]||[];
-  const board=calcBoard(entries);
+// ══════════════════════════════════════════════════════════════════
+//  🏆  LEADERBOARD VIEW
+// ══════════════════════════════════════════════════════════════════
+function LeaderboardView({allEntries}){
+  const totalWeeks = getCurrentWeek() + 1;
+  const [week, setWeek] = useState(getCurrentWeek());
+  const grouped = groupEntries(allEntries.filter(e=>e.week===week));
+  const board = calcBoard(grouped);
+
   return(
     <div style={{padding:"28px 36px",animation:"fadeUp .4s ease both"}}>
       <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:28,flexWrap:"wrap"}}>
@@ -274,10 +423,10 @@ function LeaderboardView({scores}){
         </Glass>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
-          <div style={{display:"grid",gridTemplateColumns:"50px 1fr 130px 110px",gap:14,
+          <div style={{display:"grid",gridTemplateColumns:"50px 1fr 120px 1fr",gap:14,
             padding:"6px 18px",fontFamily:"'Fira Code',monospace",fontSize:10,
             color:"rgba(255,255,255,0.3)",letterSpacing:1.5}}>
-            <span>RANK</span><span>NINJA</span><span style={{textAlign:"right"}}>TOTAL</span><span style={{textAlign:"right"}}>ENTRIES</span>
+            <span>RANK</span><span>NINJA</span><span style={{textAlign:"right"}}>TOTAL</span><span style={{paddingLeft:16}}>DAILY BREAKDOWN</span>
           </div>
           {board.map((ninja,i)=>{
             const rank=i+1;
@@ -289,20 +438,25 @@ function LeaderboardView({scores}){
                 animation:`fadeUp .4s ease both ${i*.06}s`,transition:"transform .2s"}}
                 onMouseEnter={e=>e.currentTarget.style.transform="translateX(4px)"}
                 onMouseLeave={e=>e.currentTarget.style.transform="none"}>
-                <div style={{display:"grid",gridTemplateColumns:"50px 1fr 130px 110px",gap:14,alignItems:"center"}}>
+                <div style={{display:"grid",gridTemplateColumns:"50px 1fr 120px 1fr",gap:14,alignItems:"center"}}>
                   <RankBadge rank={rank}/>
                   <div>
                     <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:14,color:"#fff"}}>{ninja.name}</div>
                     <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",marginTop:2}}>
-                      Best 3: {ninja.top3.join(" + ")}
+                      {ninja.days.length} day{ninja.days.length!==1?"s":""} played
                     </div>
                   </div>
                   <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:17,
-                    color:rank<=3?gc:"#39ff14",textShadow:rank<=3?`0 0 12px ${gc}`:"0 0 8px #39ff14"}}>
+                    color:rank<=3?gc:"#39ff14"}}>
                     {ninja.total.toLocaleString()}
                   </div>
-                  <div style={{textAlign:"right",fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.45)"}}>
-                    {ninja.entries} {ninja.entries===1?"entry":"entries"}
+                  <div style={{paddingLeft:16,display:"flex",flexWrap:"wrap",gap:6}}>
+                    {ninja.days.sort((a,b)=>a.date.localeCompare(b.date)).map((d,di)=>(
+                      <span key={di} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",
+                        borderRadius:6,padding:"3px 9px",fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.6)"}}>
+                        {d.date.slice(5)} → {d.points}
+                      </span>
+                    ))}
                   </div>
                 </div>
               </Glass>
@@ -314,75 +468,73 @@ function LeaderboardView({scores}){
   );
 }
 
-/* ── DELETE ENTRY MODAL ──────────────────────────────────────────────────── */
-function DeleteModal({entry, onConfirm, onCancel}){
-  return(
-    <div style={{position:"fixed",inset:0,zIndex:999,background:"rgba(0,0,0,0.7)",display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <Glass style={{padding:32,maxWidth:380,width:"90%",borderColor:"#ff2d7844"}}>
-        <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,color:"#ff2d78",marginBottom:12}}>DELETE ENTRY?</h3>
-        <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:14,color:"rgba(255,255,255,0.7)",marginBottom:24,lineHeight:1.5}}>
-          Remove <strong style={{color:"#fff"}}>{entry.name}</strong>'s score of <strong style={{color:"#39ff14"}}>{entry.points} pts</strong>?
-          This cannot be undone.
-        </p>
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={onCancel} style={{flex:1,padding:"11px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",
-            background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",cursor:"pointer",
-            fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13}}>Cancel</button>
-          <button onClick={onConfirm} style={{flex:1,padding:"11px",borderRadius:10,border:"none",cursor:"pointer",
-            background:"linear-gradient(135deg,#ff2d78,#ff6b35)",color:"#000",
-            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12}}>DELETE ✕</button>
-        </div>
-      </Glass>
-    </div>
-  );
-}
+// ══════════════════════════════════════════════════════════════════
+//  📝  ENTER SCORES (admin only)
+// ══════════════════════════════════════════════════════════════════
+function EnterScores({allEntries, setAllEntries, setToast}){
+  const [name, setName] = useState("");
+  const [pts, setPts] = useState("");
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(null);
+  const cw = getCurrentWeek();
+  const today = todayStr();
 
-/* ── ENTER SCORES (admin only) ───────────────────────────────────────────── */
-function EnterScores({scores,setScores,setToast}){
-  const [name,setName]=useState("");
-  const [pts,setPts]=useState("");
-  const [errors,setErrors]=useState({});
-  const [deleteTarget,setDeleteTarget]=useState(null);
-  const cw=getCurrentWeek();
-  const weekEntries=scores[cw]||[];
-  const ninjaEntries=name.trim()?weekEntries.filter(e=>e.name.toLowerCase()===name.trim().toLowerCase()):[];
-  const board=calcBoard(weekEntries);
-  const ninjaSummary=board.find(n=>n.name.toLowerCase()===name.trim().toLowerCase());
-  const ninjaRank=board.findIndex(n=>n.name.toLowerCase()===name.trim().toLowerCase())+1;
+  const weekEntries = allEntries.filter(e=>e.week===cw);
+  const grouped = groupEntries(weekEntries);
+  const board = calcBoard(grouped);
+  const ninjaGrouped = name.trim() ? grouped.filter(e=>e.name.toLowerCase()===name.trim().toLowerCase()) : [];
+  const ninjaSummary = board.find(n=>n.name.toLowerCase()===name.trim().toLowerCase());
+  const ninjaRank = board.findIndex(n=>n.name.toLowerCase()===name.trim().toLowerCase())+1;
 
   async function submit(){
     const errs={};
-    if(!name.trim())errs.name="Name is required";
+    if(!name.trim()) errs.name="Name is required";
     const p=Number(pts);
-    if(!pts||isNaN(p))errs.pts="Must be a number";
-    else if(p<0)errs.pts="No negative points!";
-    if(Object.keys(errs).length){setErrors(errs);return;}
+    if(!pts||isNaN(p)) errs.pts="Must be a number";
+    else if(p<0) errs.pts="No negative points!";
+    if(Object.keys(errs).length){ setErrors(errs); return; }
     setErrors({});
-    const updated={...scores,[cw]:[...weekEntries,{id:Date.now(),name:name.trim(),points:p,ts:Date.now()}]};
-    setScores(updated);
-    await storageSet("cn_scores",updated);
-    setPts("");
-    setToast(`${name.trim()} scored ${p} points! 🎉`);
+    setSaving(true);
+    try{
+      // Add the raw entry — groupEntries handles daily accumulation on read
+      const newEntry = { week:cw, name:name.trim(), points:p, date:today };
+      const updated = [...allEntries, newEntry];
+      const txt = serialiseLeaderboard(updated);
+      await ghWrite("leaderboard.txt", txt, `Score: ${name.trim()} +${p}pts (Week ${cw})`);
+      setAllEntries(updated);
+      setPts("");
+      setToast({ msg:`${name.trim()} scored ${p} pts! Synced to GitHub ✅`, color:"#39ff14" });
+    } catch(e){
+      setToast({ msg:`Save failed: ${e.message}`, color:"#ff2d78" });
+    }
+    setSaving(false);
   }
 
   async function deleteEntry(entry){
-    const updated={...scores,[cw]:weekEntries.filter(e=>e.id!==entry.id)};
-    setScores(updated);
-    await storageSet("cn_scores",updated);
-    setDeleteTarget(null);
-    setToast(`Deleted ${entry.name}'s ${entry.points}pt entry.`);
+    setDeleting(entry);
+    try{
+      // Remove all raw entries matching this ninja + week + date
+      const updated = allEntries.filter(e=>
+        !(e.week===entry.week && e.name===entry.name && e.date===entry.date)
+      );
+      const txt = serialiseLeaderboard(updated);
+      await ghWrite("leaderboard.txt", txt, `Delete: ${entry.name} ${entry.date} Week ${entry.week}`);
+      setAllEntries(updated);
+      setToast({ msg:`Deleted ${entry.name}'s ${entry.date} entry.`, color:"#ff2d78" });
+    } catch(e){
+      setToast({ msg:`Delete failed: ${e.message}`, color:"#ff2d78" });
+    }
+    setDeleting(null);
   }
-
-  const inputStyle=(err)=>({width:"100%",background:"rgba(255,255,255,0.06)",
-    border:`1px solid ${err?"#ff2d78":"rgba(255,255,255,0.15)"}`,borderRadius:10,
-    padding:"12px 16px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,
-    outline:"none",boxSizing:"border-box",transition:"border-color .2s"});
 
   return(
     <div style={{padding:"28px 36px",animation:"fadeUp .4s ease both"}}>
-      {deleteTarget&&<DeleteModal entry={deleteTarget} onConfirm={()=>deleteEntry(deleteTarget)} onCancel={()=>setDeleteTarget(null)}/>}
       <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:20,color:"#fff",marginBottom:6}}>📝 Enter Scores</h2>
-      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:28}}>{getWeekLabel(cw)}</p>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:6}}>{getWeekLabel(cw)}</p>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(57,255,20,0.5)",marginBottom:28}}>
+        Same ninja + same day = points accumulate into one row. Different day = separate entry.
+      </p>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
         <Glass style={{padding:26}}>
           <div style={{marginBottom:18}}>
@@ -392,42 +544,44 @@ function EnterScores({scores,setScores,setToast}){
             {errors.name&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.name}</p>}
           </div>
           <div style={{marginBottom:24}}>
-            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:8,letterSpacing:1}}>POINTS</label>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:8,letterSpacing:1}}>POINTS SCORED TODAY</label>
             <input value={pts} onChange={e=>setPts(e.target.value)} placeholder="e.g. 850" type="number" min="0"
               style={{...inputStyle(errors.pts),fontFamily:"'Fira Code',monospace",fontSize:16}}
               onFocus={e=>e.target.style.borderColor="#39ff14"} onBlur={e=>e.target.style.borderColor=errors.pts?"#ff2d78":"rgba(255,255,255,0.15)"}
-              onKeyDown={e=>e.key==="Enter"&&submit()}/>
+              onKeyDown={e=>e.key==="Enter"&&!saving&&submit()}/>
             {errors.pts&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.pts}</p>}
           </div>
-          <button onClick={submit} style={{width:"100%",padding:13,borderRadius:10,border:"none",cursor:"pointer",
-            background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
-            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,transition:"opacity .2s,transform .2s"}}
-            onMouseEnter={e=>{e.target.style.opacity=".9";e.target.style.transform="scale(1.02)";}}
-            onMouseLeave={e=>{e.target.style.opacity="1";e.target.style.transform="none";}}>
-            SUBMIT SCORE ⚡
+          <div style={{marginBottom:14,background:"rgba(57,255,20,0.06)",borderRadius:8,padding:"10px 14px",border:"1px solid #39ff1422"}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)"}}>TODAY: </span>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14"}}>{today}</span>
+          </div>
+          <button onClick={submit} disabled={saving} style={{width:"100%",padding:13,borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",
+            background:saving?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#39ff14,#00cfff)",color:saving?"rgba(255,255,255,0.4)":"#000",
+            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,transition:"opacity .2s,transform .2s",
+            display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+            {saving?<><Spinner/> SAVING...</>:"SUBMIT SCORE ⚡"}
           </button>
         </Glass>
+
         <Glass style={{padding:26,borderColor:ninjaSummary?"#39ff1433":"rgba(255,255,255,0.08)"}}>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#39ff14",marginBottom:18,letterSpacing:1}}>LIVE PREVIEW</h3>
           {ninjaSummary?(
             <>
               <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:17,color:"#fff",marginBottom:2}}>{ninjaSummary.name}</div>
-              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:18}}>Rank #{ninjaRank} this week</div>
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:18}}>Rank #{ninjaRank} this week · Total: {ninjaSummary.total} pts</div>
               <div style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"12px 14px",marginBottom:10}}>
-                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>ALL ENTRIES (top 3 count) — click to delete</div>
-                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
-                  {ninjaEntries.sort((a,b)=>b.points-a.points).map((e,i)=>(
-                    <span key={e.id}
-                      onClick={()=>setDeleteTarget(e)}
-                      title="Click to delete"
-                      style={{background:i<3?"rgba(57,255,20,0.15)":"rgba(255,255,255,0.05)",
-                        border:`1px solid ${i<3?"#39ff1444":"transparent"}`,borderRadius:6,
-                        padding:"4px 10px",fontFamily:"'Fira Code',monospace",fontSize:12,cursor:"pointer",
-                        color:i<3?"#39ff14":"rgba(255,255,255,0.45)",transition:"background .15s"}}
-                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,45,120,0.2)"}
-                      onMouseLeave={ev=>ev.currentTarget.style.background=i<3?"rgba(57,255,20,0.15)":"rgba(255,255,255,0.05)"}>
-                      {e.points}{i<3?" ✓":""} ✕
-                    </span>
+                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>DAILY ENTRIES — click ✕ to delete</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {ninjaGrouped.sort((a,b)=>a.date.localeCompare(b.date)).map((e,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      background:"rgba(57,255,20,0.08)",border:"1px solid #39ff1433",borderRadius:6,padding:"6px 10px"}}>
+                      <span style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"#39ff14"}}>{e.date} → {e.points} pts</span>
+                      <button onClick={()=>deleteEntry(e)} disabled={!!deleting}
+                        style={{background:"rgba(255,45,120,0.15)",border:"1px solid #ff2d7844",borderRadius:5,
+                          color:"#ff2d78",padding:"2px 8px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
+                        {deleting===e?<Spinner/>:"✕"}
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -437,94 +591,124 @@ function EnterScores({scores,setScores,setToast}){
                   <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:20,color:"#39ff14"}}>{ninjaSummary.total}</div>
                 </div>
                 <div style={{background:"rgba(0,207,255,0.08)",border:"1px solid #00cfff33",borderRadius:8,padding:"12px 14px"}}>
-                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:4}}>ENTRIES</div>
-                  <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:20,color:"#00cfff"}}>{ninjaSummary.entries}</div>
+                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:4}}>DAYS PLAYED</div>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:20,color:"#00cfff"}}>{ninjaSummary.days.length}</div>
                 </div>
               </div>
             </>
           ):(
-            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:160,gap:10}}>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:200,gap:10}}>
               <div style={{fontSize:38}}>🥷</div>
-              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.3)",textAlign:"center"}}>Enter a ninja name to see live stats</p>
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.3)",textAlign:"center"}}>Enter a ninja name to see their stats</p>
             </div>
           )}
+        </Glass>
+      </div>
+
+      {/* RAW FILE PREVIEW */}
+      <div style={{marginTop:28}}>
+        <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"rgba(255,255,255,0.4)",marginBottom:12,letterSpacing:1}}>📄 leaderboard.txt PREVIEW (current week)</h3>
+        <Glass style={{padding:16,fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.5)",lineHeight:1.8,maxHeight:200,overflowY:"auto"}}>
+          <pre style={{margin:0,whiteSpace:"pre-wrap"}}>
+{weekEntries.length===0?"(no entries yet for this week)":`Week # | Ninja Name       | Points Scored | Date\n-------|------------------|---------------|----------\n`+weekEntries.map(e=>`${String(e.week).padEnd(6)} | ${e.name.padEnd(16)} | ${String(e.points).padEnd(13)} | ${e.date}`).join("\n")}
+          </pre>
         </Glass>
       </div>
     </div>
   );
 }
 
-/* ── LEADERBOARDS TAB ────────────────────────────────────────────────────── */
-function LeaderboardsTab({scores,setScores,setToast,isAdmin}){
-  const [sub,setSub]=useState("view");
-  const tabs=[{id:"view",label:"🏆 Weekly Leaderboard"}];
-  if(isAdmin) tabs.push({id:"enter",label:"📝 Enter Scores"});
-  return(
-    <div style={{minHeight:"100%"}}>
-      <div style={{padding:"28px 36px 0",display:"flex",gap:8}}>
-        {tabs.map(t=>(
-          <button key={t.id} onClick={()=>setSub(t.id)} style={{padding:"10px 20px",borderRadius:99,border:"none",cursor:"pointer",
-            fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",
-            background:sub===t.id?"linear-gradient(135deg,#39ff14,#00cfff)":"rgba(255,255,255,0.07)",
-            color:sub===t.id?"#000":"rgba(255,255,255,0.6)",
-            boxShadow:sub===t.id?"0 0 20px #39ff1444":"none"}}>{t.label}</button>
-        ))}
-        {!isAdmin&&(
-          <div style={{display:"flex",alignItems:"center",padding:"10px 16px",borderRadius:99,
-            background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)"}}>
-            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)"}}>👀 Guest — view only</span>
-          </div>
-        )}
-      </div>
-      {sub==="view"&&<LeaderboardView scores={scores}/>}
-      {sub==="enter"&&isAdmin&&<EnterScores scores={scores} setScores={setScores} setToast={setToast}/>}
-    </div>
-  );
-}
+// ══════════════════════════════════════════════════════════════════
+//  🧩  RIDDLE TAB
+// ══════════════════════════════════════════════════════════════════
+function RiddleTab({setToast, isAdmin, riddleMap, setRiddleMap}){
+  const totalWeeks = getCurrentWeek() + 1;
+  const [week, setWeek] = useState(getCurrentWeek());
+  const [sName, setSName] = useState("");
+  const [sAnswer, setSAnswer] = useState("");
+  const [newRiddleText, setNewRiddleText] = useState("");
+  const [newAnswer, setNewAnswer] = useState("");
+  const [editMode, setEditMode] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [saving, setSaving] = useState(false);
 
-/* ── RIDDLE TAB ──────────────────────────────────────────────────────────── */
-function RiddleTab({setToast,isAdmin,riddlesData,setRiddlesData}){
-  const totalWeeks=getCurrentWeek()+1;
-  const [week,setWeek]=useState(getCurrentWeek());
-  const [sName,setSName]=useState("");
-  const [sAnswer,setSAnswer]=useState("");
-  const [riddleText,setRiddleText]=useState("");
-  const [editMode,setEditMode]=useState(false);
-  const [errors,setErrors]=useState({});
-  const weekData=riddlesData[week]||{text:"No riddle set for this week yet. Check back soon!",answers:[]};
+  const weekData = riddleMap[week] || { text:"No riddle set yet — check back soon!", answer:"", entries:[] };
+
+  // Check if answer is correct (case-insensitive, trimmed)
+  function isCorrect(submitted, official){
+    if(!official) return false;
+    return submitted.trim().toLowerCase().includes(official.trim().toLowerCase());
+  }
+
+  // Sort entries: first correct answer first (gold), then by timestamp, removing duplicates (keep latest)
+  function getSortedEntries(entries, answer){
+    // deduplicate: keep latest entry per person
+    const latest = {};
+    for(const e of entries){
+      if(!latest[e.name] || e.ts > latest[e.name].ts) latest[e.name] = e;
+    }
+    const unique = Object.values(latest);
+    const correct = unique.filter(e=>isCorrect(e.answer, answer)).sort((a,b)=>a.ts-b.ts);
+    const wrong = unique.filter(e=>!isCorrect(e.answer, answer)).sort((a,b)=>a.ts-b.ts);
+    return { correct, wrong, firstCorrect: correct[0]||null };
+  }
+
+  const { correct, wrong, firstCorrect } = getSortedEntries(weekData.entries, weekData.answer);
+  const allSorted = [...correct, ...wrong];
 
   async function submitAnswer(){
     const errs={};
-    if(!sName.trim())errs.name="Name required";
-    if(!sAnswer.trim())errs.answer="Answer required";
-    if(Object.keys(errs).length){setErrors(errs);return;}
+    if(!sName.trim()) errs.name="Name required";
+    if(!sAnswer.trim()) errs.answer="Answer required";
+    if(Object.keys(errs).length){ setErrors(errs); return; }
     setErrors({});
-    const updated={...riddlesData,[week]:{...weekData,answers:[...weekData.answers,{name:sName.trim(),answer:sAnswer.trim(),ts:Date.now()}]}};
-    setRiddlesData(updated);
-    await storageSet("cn_riddles",updated);
-    setSName("");setSAnswer("");
-    setToast(`${sName.trim()} submitted their answer! 🧩`);
+    setSaving(true);
+    try{
+      // Replace if name already submitted for this week, otherwise append
+      const existing = (weekData.entries||[]).filter(e=>e.name!==sName.trim());
+      const newEntry = { name:sName.trim(), answer:sAnswer.trim(), ts:Date.now() };
+      const updated = { ...riddleMap, [week]:{ ...weekData, entries:[...existing, newEntry] } };
+      const txt = serialiseRiddles(updated);
+      await ghWrite("riddle.txt", txt, `Riddle answer: ${sName.trim()} (Week ${week})`);
+      setRiddleMap(updated);
+      setSName(""); setSAnswer("");
+      const correct = isCorrect(sAnswer.trim(), weekData.answer);
+      setToast({ msg: correct ? `${sName.trim()} got it right! 🎉` : `${sName.trim()} submitted! ✅`, color: correct?"#ffd700":"#39ff14" });
+    } catch(e){
+      setToast({ msg:`Save failed: ${e.message}`, color:"#ff2d78" });
+    }
+    setSaving(false);
   }
 
   async function saveRiddle(){
-    const updated={...riddlesData,[week]:{...weekData,text:riddleText}};
-    setRiddlesData(updated);
-    await storageSet("cn_riddles",updated);
-    setEditMode(false);setToast("Riddle updated! ✏️");
+    if(!newRiddleText.trim()){ return; }
+    setSaving(true);
+    try{
+      const updated = { ...riddleMap, [week]:{ ...weekData, text:newRiddleText.trim(), answer:newAnswer.trim().toLowerCase() } };
+      const txt = serialiseRiddles(updated);
+      await ghWrite("riddle.txt", txt, `Set riddle Week ${week}`);
+      setRiddleMap(updated);
+      setEditMode(false);
+      setToast({ msg:"Riddle & answer saved! ✏️", color:"#39ff14" });
+    } catch(e){
+      setToast({ msg:`Save failed: ${e.message}`, color:"#ff2d78" });
+    }
+    setSaving(false);
   }
 
-  async function deleteAnswer(idx){
-    const newAnswers=weekData.answers.filter((_,i)=>i!==idx);
-    const updated={...riddlesData,[week]:{...weekData,answers:newAnswers}};
-    setRiddlesData(updated);
-    await storageSet("cn_riddles",updated);
-    setToast("Answer removed.");
+  async function deleteAnswer(name){
+    setSaving(true);
+    try{
+      const updated = { ...riddleMap, [week]:{ ...weekData, entries:(weekData.entries||[]).filter(e=>e.name!==name) } };
+      const txt = serialiseRiddles(updated);
+      await ghWrite("riddle.txt", txt, `Delete riddle answer: ${name} Week ${week}`);
+      setRiddleMap(updated);
+      setToast({ msg:`Removed ${name}'s answer.`, color:"#ff2d78" });
+    } catch(e){
+      setToast({ msg:`Delete failed: ${e.message}`, color:"#ff2d78" });
+    }
+    setSaving(false);
   }
-
-  const inputStyle=(err)=>({width:"100%",background:"rgba(255,255,255,0.06)",
-    border:`1px solid ${err?"#ff2d78":"rgba(255,255,255,0.15)"}`,borderRadius:10,
-    padding:"12px 16px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,
-    outline:"none",boxSizing:"border-box"});
 
   return(
     <div style={{padding:"28px 36px",animation:"fadeUp .4s ease both"}}>
@@ -538,6 +722,7 @@ function RiddleTab({setToast,isAdmin,riddlesData,setRiddlesData}){
           ))}
         </select>
       </div>
+
       {/* RIDDLE CARD */}
       <Glass style={{padding:28,marginBottom:28,borderColor:"#ff2d7833",
         boxShadow:"0 0 40px #ff2d7822,0 8px 32px rgba(0,0,0,0.4)",position:"relative",overflow:"hidden"}}>
@@ -545,23 +730,32 @@ function RiddleTab({setToast,isAdmin,riddlesData,setRiddlesData}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>RIDDLE #{week}</span>
           {isAdmin&&(
-            <button onClick={()=>{setEditMode(!editMode);setRiddleText(weekData.text);}}
+            <button onClick={()=>{ setEditMode(!editMode); setNewRiddleText(weekData.text); setNewAnswer(weekData.answer||""); }}
               style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,
                 color:"rgba(255,255,255,0.5)",padding:"5px 12px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
-              {editMode?"✕ Cancel":"✏️ Edit"}
+              {editMode?"✕ Cancel":"✏️ Edit Riddle"}
             </button>
           )}
         </div>
         {editMode&&isAdmin?(
           <div>
-            <textarea value={riddleText} onChange={e=>setRiddleText(e.target.value)}
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:8,letterSpacing:1}}>RIDDLE TEXT</label>
+            <textarea value={newRiddleText} onChange={e=>setNewRiddleText(e.target.value)}
               style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid #00cfff44",borderRadius:10,
                 padding:"14px 16px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:15,lineHeight:1.6,
-                outline:"none",resize:"vertical",minHeight:90,boxSizing:"border-box"}}/>
-            <button onClick={saveRiddle} style={{marginTop:10,padding:"10px 24px",borderRadius:8,border:"none",cursor:"pointer",
-              background:"linear-gradient(135deg,#ff2d78,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
-              SAVE RIDDLE
-            </button>
+                outline:"none",resize:"vertical",minHeight:80,boxSizing:"border-box",marginBottom:14}}/>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:8,letterSpacing:1}}>
+              CORRECT ANSWER (admin only — hidden from students)
+            </label>
+            <input value={newAnswer} onChange={e=>setNewAnswer(e.target.value)}
+              placeholder="e.g. echo" style={{...inputStyle(false),marginBottom:14}}/>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={saveRiddle} disabled={saving} style={{padding:"10px 24px",borderRadius:8,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#ff2d78,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,
+                display:"flex",alignItems:"center",gap:8}}>
+                {saving?<><Spinner/> Saving...</>:"SAVE RIDDLE ✓"}
+              </button>
+            </div>
           </div>
         ):(
           <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:"clamp(14px,1.6vw,19px)",color:"#fff",lineHeight:1.7,margin:0,fontStyle:"italic"}}>
@@ -569,10 +763,14 @@ function RiddleTab({setToast,isAdmin,riddlesData,setRiddlesData}){
           </p>
         )}
       </Glass>
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:28}}>
         {/* SUBMIT */}
         <Glass style={{padding:24}}>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#ff2d78",marginBottom:18,letterSpacing:1}}>SUBMIT YOUR ANSWER</h3>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",marginBottom:16,lineHeight:1.6}}>
+            Already answered? Submit again to update — your latest answer replaces your previous one.
+          </p>
           <div style={{marginBottom:14}}>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:8,letterSpacing:1}}>STUDENT NAME</label>
             <input value={sName} onChange={e=>setSName(e.target.value)} placeholder="Your ninja name" style={inputStyle(errors.name)}/>
@@ -584,43 +782,61 @@ function RiddleTab({setToast,isAdmin,riddlesData,setRiddlesData}){
               style={{...inputStyle(errors.answer),resize:"vertical",minHeight:75}}/>
             {errors.answer&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.answer}</p>}
           </div>
-          <button onClick={submitAnswer} style={{width:"100%",padding:12,borderRadius:10,border:"none",cursor:"pointer",
-            background:"linear-gradient(135deg,#ff2d78,#00cfff)",color:"#000",
-            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1}}
-            onMouseEnter={e=>e.target.style.opacity=".9"} onMouseLeave={e=>e.target.style.opacity="1"}>
-            SUBMIT ANSWER 🧩
+          <button onClick={submitAnswer} disabled={saving} style={{width:"100%",padding:12,borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",
+            background:saving?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#ff2d78,#00cfff)",color:saving?"rgba(255,255,255,0.4)":"#000",
+            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            {saving?<><Spinner/> Saving...</>:"SUBMIT ANSWER 🧩"}
           </button>
         </Glass>
-        {/* ANSWERS */}
+
+        {/* ANSWERS LIST */}
         <div>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#00cfff",marginBottom:14,letterSpacing:1}}>
-            STUDENT ANSWERS ({weekData.answers.length})
+            STUDENT ANSWERS ({allSorted.length})
           </h3>
-          <div style={{display:"flex",flexDirection:"column",gap:9,maxHeight:360,overflowY:"auto"}}>
-            {weekData.answers.length===0?(
+          <div style={{display:"flex",flexDirection:"column",gap:9,maxHeight:380,overflowY:"auto"}}>
+            {allSorted.length===0?(
               <Glass style={{padding:24,textAlign:"center"}}>
                 <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.35)",fontSize:13}}>No answers yet — be the first! 🧠</p>
               </Glass>
-            ):weekData.answers.map((a,i)=>(
-              <Glass key={i} style={{padding:"13px 16px",animation:`fadeUp .3s ease both ${i*.05}s`,transition:"transform .2s"}}
-                onMouseEnter={e=>e.currentTarget.style.transform="translateX(4px)"}
-                onMouseLeave={e=>e.currentTarget.style.transform="none"}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
-                  <span style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:13,color:"#00cfff"}}>{a.name}</span>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)"}}>
-                      {new Date(a.ts).toLocaleDateString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}
-                    </span>
-                    {isAdmin&&(
-                      <button onClick={()=>deleteAnswer(i)} title="Delete answer"
-                        style={{background:"rgba(255,45,120,0.1)",border:"1px solid #ff2d7844",borderRadius:6,
-                          color:"#ff2d78",padding:"2px 7px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>✕</button>
-                    )}
+            ):allSorted.map((a,i)=>{
+              const isFirst = firstCorrect && a.name === firstCorrect.name;
+              const correct_ = isCorrect(a.answer, weekData.answer);
+              const borderColor = isFirst ? "#ffd700" : correct_ ? "#39ff14" : "rgba(255,255,255,0.08)";
+              const glow = isFirst ? "0 0 24px #ffd70044,0 4px 16px rgba(0,0,0,0.4)" : "0 4px 16px rgba(0,0,0,0.3)";
+              return(
+                <Glass key={i} style={{padding:"13px 16px",borderColor,boxShadow:glow,
+                  animation:`fadeUp .3s ease both ${i*.05}s`,transition:"transform .2s",position:"relative"}}
+                  onMouseEnter={e=>e.currentTarget.style.transform="translateX(4px)"}
+                  onMouseLeave={e=>e.currentTarget.style.transform="none"}>
+                  {isFirst&&(
+                    <div style={{position:"absolute",top:-1,left:-1,right:-1,bottom:-1,
+                      border:"2px solid #ffd70066",borderRadius:16,pointerEvents:"none"}}/>
+                  )}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      {isFirst&&<span style={{fontSize:16}}>👑</span>}
+                      <span style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:13,
+                        color:isFirst?"#ffd700":correct_?"#39ff14":"#00cfff"}}>{a.name}</span>
+                      {isFirst&&<span style={{background:"rgba(255,215,0,0.15)",border:"1px solid #ffd70044",borderRadius:4,
+                        padding:"1px 6px",fontFamily:"'Fira Code',monospace",fontSize:9,color:"#ffd700"}}>FIRST CORRECT</span>}
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)"}}>
+                        {new Date(a.ts).toLocaleDateString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}
+                      </span>
+                      {isAdmin&&(
+                        <button onClick={()=>deleteAnswer(a.name)} disabled={saving}
+                          style={{background:"rgba(255,45,120,0.1)",border:"1px solid #ff2d7844",borderRadius:6,
+                            color:"#ff2d78",padding:"2px 7px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>✕</button>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.75)",margin:0}}>{a.answer}</p>
-              </Glass>
-            ))}
+                  <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.75)",margin:0}}>{a.answer}</p>
+                </Glass>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -628,7 +844,39 @@ function RiddleTab({setToast,isAdmin,riddlesData,setRiddlesData}){
   );
 }
 
-/* ── SIDEBAR ─────────────────────────────────────────────────────────────── */
+// ══════════════════════════════════════════════════════════════════
+//  🔲  LEADERBOARDS TAB WRAPPER
+// ══════════════════════════════════════════════════════════════════
+function LeaderboardsTab({allEntries, setAllEntries, setToast, isAdmin}){
+  const [sub, setSub] = useState("view");
+  const tabs = [{id:"view",label:"🏆 Weekly Leaderboard"}];
+  if(isAdmin) tabs.push({id:"enter",label:"📝 Enter Scores"});
+  return(
+    <div style={{minHeight:"100%"}}>
+      <div style={{padding:"28px 36px 0",display:"flex",gap:8,alignItems:"center"}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)} style={{padding:"10px 20px",borderRadius:99,border:"none",cursor:"pointer",
+            fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",
+            background:sub===t.id?"linear-gradient(135deg,#39ff14,#00cfff)":"rgba(255,255,255,0.07)",
+            color:sub===t.id?"#000":"rgba(255,255,255,0.6)",
+            boxShadow:sub===t.id?"0 0 20px #39ff1444":"none"}}>{t.label}</button>
+        ))}
+        {!isAdmin&&(
+          <div style={{display:"flex",alignItems:"center",padding:"8px 16px",borderRadius:99,
+            background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)"}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)"}}>👀 Guest — view only</span>
+          </div>
+        )}
+      </div>
+      {sub==="view"&&<LeaderboardView allEntries={allEntries}/>}
+      {sub==="enter"&&isAdmin&&<EnterScores allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast}/>}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  🗂️  SIDEBAR
+// ══════════════════════════════════════════════════════════════════
 const NAV=[{id:"home",icon:"🏠",label:"Home"},{id:"leaderboards",icon:"🏆",label:"Leaderboards"},{id:"riddle",icon:"🧩",label:"Riddle of the Week"}];
 function Sidebar({active,onNav,isAdmin,onLogout}){
   return(
@@ -637,17 +885,14 @@ function Sidebar({active,onNav,isAdmin,onLogout}){
       backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
       borderRight:"1px solid rgba(255,255,255,0.06)",zIndex:10}}>
       <div style={{padding:"14px 10px 20px",textAlign:"center"}}>
-        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:12,letterSpacing:1.5,
-          color:"#39ff14",textShadow:"0 0 16px #39ff14aa",lineHeight:1.4}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:12,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
         <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
         <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
         <div style={{display:"inline-flex",alignItems:"center",gap:5,
           background:isAdmin?"rgba(57,255,20,0.12)":"rgba(0,207,255,0.1)",
-          border:`1px solid ${isAdmin?"#39ff1444":"#00cfff44"}`,
-          borderRadius:99,padding:"4px 10px"}}>
+          border:`1px solid ${isAdmin?"#39ff1444":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
           <span style={{fontSize:10}}>{isAdmin?"🔐":"👀"}</span>
-          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,
-            color:isAdmin?"#39ff14":"#00cfff",letterSpacing:1}}>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":"#00cfff",letterSpacing:1}}>
             {isAdmin?"ADMIN":"GUEST"}
           </span>
         </div>
@@ -681,9 +926,9 @@ function Sidebar({active,onNav,isAdmin,onLogout}){
   );
 }
 
-/* ── LOGIN SCREEN ────────────────────────────────────────────────────────── */
-const ADMIN_PASS = "Robbinsvillle";
-
+// ══════════════════════════════════════════════════════════════════
+//  🔑  LOGIN SCREEN
+// ══════════════════════════════════════════════════════════════════
 function LoginScreen({onLogin}){
   const [pw,setPw]=useState("");
   const [show,setShow]=useState(false);
@@ -691,55 +936,47 @@ function LoginScreen({onLogin}){
   const [hint,setHint]=useState("");
 
   function attempt(){
-    if(pw === ADMIN_PASS){ onLogin("admin"); }
-    else if(pw.trim() === ""){setHint("Enter a password or choose Guest access below.");setShake(true);setTimeout(()=>setShake(false),500);}
+    if(pw===ADMIN_PASS){ onLogin("admin"); }
+    else if(pw.trim()===""){ setHint("Enter the admin password or use Guest below."); setShake(true); setTimeout(()=>setShake(false),500); }
     else { onLogin("guest"); }
   }
 
   return(
     <div style={{position:"fixed",inset:0,display:"flex",alignItems:"center",justifyContent:"center",
-      background:"radial-gradient(ellipse 70% 60% at 50% 40%,rgba(57,255,20,0.07) 0%,transparent 70%),radial-gradient(ellipse 50% 50% at 30% 70%,rgba(0,207,255,0.08) 0%,transparent 70%),#060609",
-      zIndex:100}}>
+      background:"radial-gradient(ellipse 70% 60% at 50% 40%,rgba(57,255,20,0.07) 0%,transparent 70%),#060609",zIndex:100}}>
       <Particles/><FloatingCode/>
       <div style={{position:"relative",zIndex:2,width:"100%",maxWidth:420,padding:"0 24px",animation:"fadeUp .6s ease both"}}>
         <div style={{textAlign:"center",marginBottom:40}}>
           <div style={{display:"inline-flex",alignItems:"center",justifyContent:"center",
             width:72,height:72,borderRadius:"50%",marginBottom:16,
-            background:"rgba(57,255,20,0.08)",border:"2px solid #39ff1444",
-            boxShadow:"0 0 30px #39ff1433"}}>
+            background:"rgba(57,255,20,0.08)",border:"2px solid #39ff1444"}}>
             <span style={{fontSize:36}}>🥷</span>
           </div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:22,letterSpacing:2,
-            color:"#39ff14",textShadow:"0 0 20px #39ff14aa",marginBottom:4}}>CODE NINJAS</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:22,letterSpacing:2,color:"#39ff14",marginBottom:4}}>CODE NINJAS</div>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)",letterSpacing:3}}>ROBBINSVILLE</div>
           <div style={{width:60,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"14px auto 0",borderRadius:99}}/>
         </div>
-        <Glass style={{padding:32,borderColor:"rgba(57,255,20,0.15)",
-          boxShadow:"0 0 60px rgba(57,255,20,0.08),0 20px 60px rgba(0,0,0,0.6)",
-          animation:shake?"shakeCard .5s ease":"none"}}>
+        <Glass style={{padding:32,borderColor:"rgba(57,255,20,0.15)",animation:shake?"shakeCard .5s ease":"none"}}>
           <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#fff",textAlign:"center",marginBottom:6,letterSpacing:1}}>WELCOME BACK</h2>
-          <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.4)",textAlign:"center",marginBottom:28}}>Enter the admin password for full access</p>
-          <div style={{marginBottom:8,position:"relative"}}>
+          <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.4)",textAlign:"center",marginBottom:28}}>Admin password for full access, or continue as guest</p>
+          <div style={{marginBottom:8}}>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:8,letterSpacing:1.5}}>PASSWORD</label>
             <div style={{position:"relative"}}>
-              <input value={pw} onChange={e=>{setPw(e.target.value);setHint("");}}
-                onKeyDown={e=>e.key==="Enter"&&attempt()} type={show?"text":"password"}
-                placeholder="Enter admin password..."
+              <input value={pw} onChange={e=>{setPw(e.target.value);setHint("");}} onKeyDown={e=>e.key==="Enter"&&attempt()}
+                type={show?"text":"password"} placeholder="Enter admin password..."
                 style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,
                   padding:"13px 44px 13px 16px",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:14,
-                  outline:"none",boxSizing:"border-box",transition:"border-color .2s",letterSpacing:pw&&!show?3:1}}
+                  outline:"none",boxSizing:"border-box",letterSpacing:pw&&!show?3:1}}
                 onFocus={e=>e.target.style.borderColor="#39ff14"}
                 onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.15)"}/>
-              <button onClick={()=>setShow(!show)} style={{position:"absolute",right:12,top:"50%",
-                transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",
-                color:"rgba(255,255,255,0.4)",fontSize:16,padding:0}}>{show?"🙈":"👁️"}</button>
+              <button onClick={()=>setShow(!show)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",
+                background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontSize:16,padding:0}}>{show?"🙈":"👁️"}</button>
             </div>
             {hint&&<p style={{color:"#ff2d78",fontSize:11,marginTop:6,fontFamily:"'Fira Code',monospace"}}>{hint}</p>}
           </div>
           <button onClick={attempt} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",cursor:"pointer",
-            background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
-            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,letterSpacing:1.5,
-            marginTop:18,transition:"transform .2s,opacity .2s",boxShadow:"0 0 24px #39ff1444"}}
+            background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",
+            fontWeight:700,fontSize:13,letterSpacing:1.5,marginTop:18,transition:"transform .2s,opacity .2s"}}
             onMouseEnter={e=>{e.target.style.transform="scale(1.02)";e.target.style.opacity=".92";}}
             onMouseLeave={e=>{e.target.style.transform="none";e.target.style.opacity="1";}}>
             ENTER DOJO ⚡
@@ -750,15 +987,14 @@ function LoginScreen({onLogin}){
             <div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/>
           </div>
           <button onClick={()=>onLogin("guest")} style={{width:"100%",padding:"12px",borderRadius:10,
-            border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",
-            background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.6)",
-            fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,transition:"all .2s"}}
+            border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",background:"rgba(255,255,255,0.04)",
+            color:"rgba(255,255,255,0.6)",fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,transition:"all .2s"}}
             onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="#fff";}}
             onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.04)";e.currentTarget.style.color="rgba(255,255,255,0.6)";}}>
             👀 Continue as Guest (View Only)
           </button>
           <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.2)",textAlign:"center",marginTop:18,lineHeight:1.6}}>
-            Guests can view leaderboards & riddles.<br/>Admin access required to enter scores.
+            Guests can view leaderboards & riddles.<br/>Admin access required to enter scores &amp; riddles.
           </p>
         </Glass>
       </div>
@@ -766,70 +1002,73 @@ function LoginScreen({onLogin}){
   );
 }
 
-/* ── LOADING SCREEN ──────────────────────────────────────────────────────── */
-function LoadingScreen(){
+// ══════════════════════════════════════════════════════════════════
+//  ⏳  LOADING SCREEN
+// ══════════════════════════════════════════════════════════════════
+function LoadingScreen({status}){
   return(
     <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
       background:"#060609",zIndex:200,gap:16}}>
       <div style={{fontSize:48}}>🥷</div>
-      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:14,color:"#39ff14",letterSpacing:2,
-        textShadow:"0 0 16px #39ff14aa"}}>LOADING DOJO...</div>
-      <div style={{width:40,height:40,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",
-        borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:14,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:40,height:40,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
     </div>
   );
 }
 
-/* ── APP ─────────────────────────────────────────────────────────────────── */
+// ══════════════════════════════════════════════════════════════════
+//  🚀  APP ROOT
+// ══════════════════════════════════════════════════════════════════
 function App(){
   const [role,setRole]=useState(null);
   const [tab,setTab]=useState("home");
-  const [scores,setScores]=useState({});
-  const [riddlesData,setRiddlesData]=useState({});
+  const [allEntries,setAllEntries]=useState([]);
+  const [riddleMap,setRiddleMap]=useState({});
   const [toast,setToast]=useState(null);
   const [loading,setLoading]=useState(true);
-  const isAdmin = role==="admin";
+  const [loadStatus,setLoadStatus]=useState("Fetching from GitHub...");
+  const isAdmin=role==="admin";
 
-  // load from cross-device storage on mount
-  useEffect(()=>{
-    async function loadData(){
-      const s=await storageGet("cn_scores");
-      const r=await storageGet("cn_riddles");
-      if(s)setScores(s);
-      if(r)setRiddlesData(r);
-      setLoading(false);
-    }
-    loadData();
-  },[]);
+  async function loadData(){
+    setLoadStatus("Reading leaderboard.txt...");
+    try{
+      const lb=await ghRead("leaderboard.txt");
+      setAllEntries(parseLeaderboard(lb));
+    } catch(e){ console.warn("leaderboard read error",e); }
+    setLoadStatus("Reading riddle.txt...");
+    try{
+      const rd=await ghRead("riddle.txt");
+      setRiddleMap(parseRiddles(rd));
+    } catch(e){ console.warn("riddle read error",e); }
+    setLoading(false);
+  }
 
-  // poll for updates every 30s (so other devices see changes)
+  useEffect(()=>{ loadData(); },[]);
+
+  // Refresh every 60s so guests see live updates
   useEffect(()=>{
-    if(!role)return;
-    const interval=setInterval(async()=>{
-      const s=await storageGet("cn_scores");
-      const r=await storageGet("cn_riddles");
-      if(s)setScores(s);
-      if(r)setRiddlesData(r);
-    },30000);
-    return()=>clearInterval(interval);
+    if(!role) return;
+    const iv=setInterval(loadData, 60000);
+    return()=>clearInterval(iv);
   },[role]);
 
-  if(loading)return <LoadingScreen/>;
-  if(!role)return <LoginScreen onLogin={r=>setRole(r)}/>;
+  if(loading) return <LoadingScreen status={loadStatus}/>;
+  if(!role) return <LoginScreen onLogin={r=>setRole(r)}/>;
 
   return(
     <>
       <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
-        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),radial-gradient(ellipse 40% 40% at 60% 60%,rgba(255,45,120,0.04) 0%,transparent 70%),#060609"}}/>
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
       <div style={{display:"flex",height:"100vh",position:"relative",zIndex:1}}>
-        <Sidebar active={tab} onNav={setTab} isAdmin={isAdmin} onLogout={()=>setRole(null)}/>
+        <Sidebar active={tab} onNav={setTab} isAdmin={isAdmin} onLogout={()=>{setRole(null);}}/>
         <div key={tab} style={{flex:1,overflowY:"auto",animation:"fadeUp .35s ease both"}}>
-          {tab==="home"&&<HomeTab onNav={setTab} scores={scores}/>}
-          {tab==="leaderboards"&&<LeaderboardsTab scores={scores} setScores={setScores} setToast={setToast} isAdmin={isAdmin}/>}
-          {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin} riddlesData={riddlesData} setRiddlesData={setRiddlesData}/>}
+          {tab==="home"&&<HomeTab onNav={setTab} allEntries={allEntries}/>}
+          {tab==="leaderboards"&&<LeaderboardsTab allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast} isAdmin={isAdmin}/>}
+          {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>}
         </div>
       </div>
-      {toast&&<Toast msg={toast} onDone={()=>setToast(null)}/>}
+      {toast&&<Toast msg={toast.msg} color={toast.color||"#39ff14"} onDone={()=>setToast(null)}/>}
     </>
   );
 }
