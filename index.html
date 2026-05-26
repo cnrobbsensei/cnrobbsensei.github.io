@@ -168,8 +168,20 @@ function getAttemptsToday(allEntries, name, week, date){
     e.date === date
   ).length;
 }
-// Build ranked leaderboard from grouped day-entries
+// Each ninja+day is its own ranked row — no cross-day summing
 function calcBoard(groupedForWeek){
+  return groupedForWeek
+    .map(e => ({
+      name: e.name,
+      date: e.date,
+      points: e.points,
+      attempts: e.attempts,
+      ids: e.ids,
+    }))
+    .sort((a,b) => b.points - a.points);
+}
+// Still need a per-ninja weekly summary for the Enter Scores live preview
+function calcNinjaSummary(groupedForWeek){
   const map = {};
   for(const e of groupedForWeek){
     if(!map[e.name]) map[e.name]={name:e.name,total:0,days:[]};
