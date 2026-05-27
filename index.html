@@ -168,8 +168,20 @@ function getAttemptsToday(allEntries, name, week, date){
     e.date === date
   ).length;
 }
-// Build ranked leaderboard from grouped day-entries
+// Each ninja+day is its own ranked row — no cross-day summing
 function calcBoard(groupedForWeek){
+  return groupedForWeek
+    .map(e => ({
+      name: e.name,
+      date: e.date,
+      points: e.points,
+      attempts: e.attempts,
+      ids: e.ids,
+    }))
+    .sort((a,b) => b.points - a.points);
+}
+// Still need a per-ninja weekly summary for the Enter Scores live preview
+function calcNinjaSummary(groupedForWeek){
   const map = {};
   for(const e of groupedForWeek){
     if(!map[e.name]) map[e.name]={name:e.name,total:0,days:[]};
@@ -346,7 +358,7 @@ function HomeTab({onNav,allEntries}){
   const cw=getCurrentWeek();
   const grouped=groupEntries(allEntries);
   const weekGrouped=grouped.filter(e=>e.week===cw);
-  const board=calcBoard(weekGrouped);
+  const board=calcNinjaSummary(weekGrouped);
   const topNinja=board[0];
   const topScore=grouped.reduce((m,e)=>e.points>m?e.points:m,0);
   const statCards=[
@@ -426,33 +438,43 @@ function LeaderboardView({allEntries}){
         </Glass>
       ):(
         <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          <div style={{display:"grid",gridTemplateColumns:"44px 1fr 100px",gap:10,padding:"5px 16px",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:1.5}}>
-            <span>RANK</span><span>NINJA</span><span style={{textAlign:"right"}}>TOTAL</span>
+          {/* Column headers */}
+          <div style={{display:"grid",gridTemplateColumns:"44px 1fr 80px 110px",gap:10,padding:"5px 16px",
+            fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:1.5}}>
+            <span>RANK</span><span>NINJA</span><span>DATE</span><span style={{textAlign:"right"}}>SCORE</span>
           </div>
-          {board.map((ninja,i)=>{
+          {/* One card per name+day entry */}
+          {board.map((row,i)=>{
             const rank=i+1;
             const gc=rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":"transparent";
             return(
-              <Glass key={ninja.name} style={{padding:"12px 16px",borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.08)",
+              <Glass key={`${row.name}-${row.date}-${i}`} style={{padding:"12px 16px",
+                borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.08)",
                 boxShadow:rank<=3?`0 0 20px ${gc}22,0 8px 24px rgba(0,0,0,0.4)`:"0 4px 16px rgba(0,0,0,0.3)",
-                animation:`fadeUp .4s ease both ${i*.06}s`}}>
-                <div style={{display:"grid",gridTemplateColumns:"44px 1fr 100px",gap:10,alignItems:"center",marginBottom:ninja.days.length?8:0}}>
+                animation:`fadeUp .4s ease both ${i*.05}s`}}>
+                <div style={{display:"grid",gridTemplateColumns:"44px 1fr 80px 110px",gap:10,alignItems:"center"}}>
                   <RankBadge rank={rank}/>
+                  {/* Name */}
+                  <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,
+                    fontSize:"clamp(12px,1.5vw,14px)",color:"#fff"}}>{row.name}</div>
+                  {/* Date */}
                   <div>
-                    <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:"clamp(12px,1.5vw,14px)",color:"#fff"}}>{ninja.name}</div>
-                    <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginTop:2}}>{ninja.days.length} day{ninja.days.length!==1?"s":""} played</div>
+                    <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.5)"}}>
+                      {row.date.slice(5)}
+                    </div>
+                    {row.attempts>1&&(
+                      <div style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.25)",marginTop:1}}>
+                        {row.attempts}/{MAX_ATTEMPTS_PER_DAY} tries
+                      </div>
+                    )}
                   </div>
-                  <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:"clamp(14px,1.8vw,17px)",color:rank<=3?gc:"#39ff14"}}>{ninja.total.toLocaleString()}</div>
-                </div>
-                {/* Per-day breakdown */}
-                <div style={{display:"flex",flexWrap:"wrap",gap:5,paddingLeft:54}}>
-                  {ninja.days.sort((a,b)=>a.date.localeCompare(b.date)).map((d,di)=>(
-                    <span key={di} title={`${d.attempts} attempt${d.attempts!==1?"s":""}`}
-                      style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.1)",
-                        borderRadius:6,padding:"2px 8px",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.6)"}}>
-                      {d.date.slice(5)} → {d.points} <span style={{opacity:.5,fontSize:8}}>({d.attempts}✕)</span>
-                    </span>
-                  ))}
+                  {/* Score */}
+                  <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,
+                    fontSize:"clamp(14px,1.8vw,17px)",
+                    color:rank<=3?gc:"#39ff14",
+                    textShadow:rank<=3?`0 0 10px ${gc}88`:"0 0 8px #39ff1455"}}>
+                    {row.points.toLocaleString()}
+                  </div>
                 </div>
               </Glass>
             );
@@ -476,7 +498,7 @@ function EnterScores({allEntries,setAllEntries,setToast}){
 
   const weekEntries=allEntries.filter(e=>e.week===cw);
   const grouped=groupEntries(weekEntries);
-  const board=calcBoard(grouped);
+  const board=calcNinjaSummary(grouped);
   const ninjaGrouped=name.trim()?grouped.filter(e=>e.name.toLowerCase()===name.trim().toLowerCase()):[];
   const ninjaSummary=board.find(n=>n.name.toLowerCase()===name.trim().toLowerCase());
   const ninjaRank=board.findIndex(n=>n.name.toLowerCase()===name.trim().toLowerCase())+1;
