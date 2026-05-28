@@ -86,7 +86,7 @@ window.fbRiddles = {
       for(const [id,sub] of Object.entries(subs)){
         entries.push({id,...sub});
       }
-      map[wNum] = {text:wData.text||"",answer:wData.answer||"",entries};
+      map[wNum] = {text:wData.text||"",answer:wData.answer||"",revealed:wData.revealed||false,entries};
     }
     return map;
   },
@@ -118,7 +118,7 @@ const ADMIN_PASS = "Senseis";
 const MAX_ATTEMPTS_PER_DAY = 3;
 
 // ── Week utils ──────────────────────────────────────────────────────────────
-const WEEK_START = new Date("2026-05-13T00:00:00");
+const WEEK_START = new Date("2026-05-28T00:00:00"); // weeks start on Thursdays
 function getCurrentWeek(){
   const diff = new Date() - WEEK_START;
   return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
@@ -136,14 +136,7 @@ function todayStr(){
 
 // ── Input window check ──────────────────────────────────────────────────────
 function isInputWindowOpen(){
-  const now = new Date();
-  const day = now.getDay();
-  const totalMin = now.getHours()*60+now.getMinutes();
-  const isTueThuRange = (day>=2 && day<=4);
-  const isWeekend = (day===0||day===6);
-  const isTueThuTime = totalMin >= 16*60+30 && totalMin < 19*60;
-  const isWeekendTime = totalMin >= 11*60 && totalMin < 14*60;
-  return (isTueThuRange && isTueThuTime) || (isWeekend && isWeekendTime);
+  return true; // open at all times
 }
 
 // ── Leaderboard logic ───────────────────────────────────────────────────────
@@ -415,14 +408,96 @@ function HomeTab({onNav,allEntries}){
 }
 
 // ── Leaderboard View ────────────────────────────────────────────────────────
+// Session days shown in order, Thu–Sun + Tue–Wed
+const SESSION_DAYS = [
+  {label:"Tuesday",   short:"Tue", dow:2},
+  {label:"Wednesday", short:"Wed", dow:3},
+  {label:"Thursday",  short:"Thu", dow:4},
+  {label:"Saturday",  short:"Sat", dow:6},
+  {label:"Sunday",    short:"Sun", dow:0},
+];
+function dowFromDateStr(dateStr){
+  // dateStr = "YYYY-MM-DD"
+  const [y,m,d] = dateStr.split("-").map(Number);
+  return new Date(y, m-1, d).getDay();
+}
+function sessionLabelForDate(dateStr){
+  const dow = dowFromDateStr(dateStr);
+  const found = SESSION_DAYS.find(s => s.dow === dow);
+  return found ? found.label : "Other";
+}
+
 function LeaderboardView({allEntries}){
   const totalWeeks=getCurrentWeek()+1;
   const [week,setWeek]=useState(getCurrentWeek());
-  const grouped=groupEntries(allEntries.filter(e=>e.week===week));
-  const board=calcBoard(grouped);
+  const weekEntries=allEntries.filter(e=>e.week===week);
+  const grouped=groupEntries(weekEntries);
+  const board=calcBoard(grouped); // flat, sorted by score desc
+
+  // Split board rows into buckets by session day
+  const dayBuckets = SESSION_DAYS.map(sd => ({
+    ...sd,
+    rows: board.filter(row => dowFromDateStr(row.date) === sd.dow)
+  })).filter(b => b.rows.length > 0);
+
+  // Rows that don't fall on a session day (edge case)
+  const otherRows = board.filter(row => !SESSION_DAYS.find(s => s.dow === dowFromDateStr(row.date)));
+
+  function DaySection({label, color, rows}){
+    return(
+      <div style={{marginBottom:28}}>
+        {/* Day header */}
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+          <div style={{height:1,flex:1,background:`linear-gradient(90deg,${color}55,transparent)`}}/>
+          <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,fontWeight:700,
+            color:color,letterSpacing:2,textShadow:`0 0 12px ${color}88`}}>{label.toUpperCase()}</span>
+          <div style={{height:1,flex:1,background:`linear-gradient(270deg,${color}55,transparent)`}}/>
+        </div>
+        {/* Column headers */}
+        <div style={{display:"grid",gridTemplateColumns:"44px 1fr 110px",gap:10,
+          padding:"4px 16px",fontFamily:"'Fira Code',monospace",fontSize:9,
+          color:"rgba(255,255,255,0.25)",letterSpacing:1.5,marginBottom:6}}>
+          <span>RANK</span><span>NINJA</span><span style={{textAlign:"right"}}>SCORE</span>
+        </div>
+        {rows.map((row,i)=>{
+          const rank=i+1;
+          const gc=rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":"transparent";
+          return(
+            <Glass key={`${row.name}-${row.date}-${i}`} style={{padding:"11px 16px",marginBottom:7,
+              borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.07)",
+              boxShadow:rank<=3?`0 0 16px ${gc}22,0 4px 20px rgba(0,0,0,0.4)`:"0 4px 14px rgba(0,0,0,0.3)",
+              animation:`fadeUp .35s ease both ${i*.04}s`}}>
+              <div style={{display:"grid",gridTemplateColumns:"44px 1fr 110px",gap:10,alignItems:"center"}}>
+                <RankBadge rank={rank}/>
+                <div>
+                  <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,
+                    fontSize:"clamp(12px,1.5vw,14px)",color:"#fff"}}>{row.name}</div>
+                  {row.attempts>1&&(
+                    <div style={{fontFamily:"'Fira Code',monospace",fontSize:8,
+                      color:"rgba(255,255,255,0.25)",marginTop:2}}>
+                      {row.attempts}/{MAX_ATTEMPTS_PER_DAY} attempts
+                    </div>
+                  )}
+                </div>
+                <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,
+                  fontSize:"clamp(13px,1.8vw,17px)",
+                  color:rank<=3?gc:"#39ff14",
+                  textShadow:rank<=3?`0 0 10px ${gc}88`:"0 0 8px #39ff1455"}}>
+                  {row.points.toLocaleString()}
+                </div>
+              </div>
+            </Glass>
+          );
+        })}
+      </div>
+    );
+  }
+
+  const DAY_COLORS=["#00cfff","#39ff14","#ff2d78","#ffd700","#bf5fff"];
+
   return(
     <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28,flexWrap:"wrap"}}>
         <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,20px)",color:"#fff",margin:0}}>🏆 Ring Toss Leaderboard</h2>
         <select value={week} onChange={e=>setWeek(Number(e.target.value))}
           style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",
@@ -432,54 +507,20 @@ function LeaderboardView({allEntries}){
           ))}
         </select>
       </div>
+
       {board.length===0?(
         <Glass style={{padding:40,textAlign:"center"}}>
           <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>No scores yet for this week. Be the first! 🥷</p>
         </Glass>
       ):(
-        <div style={{display:"flex",flexDirection:"column",gap:8}}>
-          {/* Column headers */}
-          <div style={{display:"grid",gridTemplateColumns:"44px 1fr 80px 110px",gap:10,padding:"5px 16px",
-            fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:1.5}}>
-            <span>RANK</span><span>NINJA</span><span>DATE</span><span style={{textAlign:"right"}}>SCORE</span>
-          </div>
-          {/* One card per name+day entry */}
-          {board.map((row,i)=>{
-            const rank=i+1;
-            const gc=rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":"transparent";
-            return(
-              <Glass key={`${row.name}-${row.date}-${i}`} style={{padding:"12px 16px",
-                borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.08)",
-                boxShadow:rank<=3?`0 0 20px ${gc}22,0 8px 24px rgba(0,0,0,0.4)`:"0 4px 16px rgba(0,0,0,0.3)",
-                animation:`fadeUp .4s ease both ${i*.05}s`}}>
-                <div style={{display:"grid",gridTemplateColumns:"44px 1fr 80px 110px",gap:10,alignItems:"center"}}>
-                  <RankBadge rank={rank}/>
-                  {/* Name */}
-                  <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,
-                    fontSize:"clamp(12px,1.5vw,14px)",color:"#fff"}}>{row.name}</div>
-                  {/* Date */}
-                  <div>
-                    <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.5)"}}>
-                      {row.date.slice(5)}
-                    </div>
-                    {row.attempts>1&&(
-                      <div style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.25)",marginTop:1}}>
-                        {row.attempts}/{MAX_ATTEMPTS_PER_DAY} tries
-                      </div>
-                    )}
-                  </div>
-                  {/* Score */}
-                  <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,
-                    fontSize:"clamp(14px,1.8vw,17px)",
-                    color:rank<=3?gc:"#39ff14",
-                    textShadow:rank<=3?`0 0 10px ${gc}88`:"0 0 8px #39ff1455"}}>
-                    {row.points.toLocaleString()}
-                  </div>
-                </div>
-              </Glass>
-            );
-          })}
-        </div>
+        <>
+          {dayBuckets.map((bucket,bi)=>(
+            <DaySection key={bucket.label} label={bucket.label} color={DAY_COLORS[bi%DAY_COLORS.length]} rows={bucket.rows}/>
+          ))}
+          {otherRows.length>0&&(
+            <DaySection label="Other" color="#aaa" rows={otherRows}/>
+          )}
+        </>
       )}
     </div>
   );
@@ -708,28 +749,34 @@ function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
   const [newRiddleText,setNewRiddleText]=useState("");
   const [newAnswer,setNewAnswer]=useState("");
   const [editMode,setEditMode]=useState(false);
+  const [revealMode,setRevealMode]=useState(false);
+  const [revealAnswer,setRevealAnswer]=useState("");
   const [errors,setErrors]=useState({});
   const [saving,setSaving]=useState(false);
-  const inputOpen=isInputWindowOpen();
-  const weekData=riddleMap[week]||{text:"No riddle set yet — check back soon!",answer:"",entries:[]};
+  const weekData=riddleMap[week]||{text:"No riddle set yet — check back soon!",answer:"",revealed:false,entries:[]};
+
+  // Answer is only used for grading AFTER admin reveals it
+  const gradingActive = weekData.revealed && !!weekData.answer;
 
   function isCorrect(submitted,official){
-    if(!official) return false;
+    if(!official||!gradingActive) return false;
     return submitted.trim().toLowerCase().includes(official.trim().toLowerCase());
   }
-  function getSortedEntries(entries,answer){
+  function getSortedEntries(entries){
+    // Show all unique submissions (latest per name), correct first if grading active
     const latest={};
     for(const e of entries){if(!latest[e.name]||e.ts>latest[e.name].ts) latest[e.name]=e;}
     const unique=Object.values(latest);
-    const correct=unique.filter(e=>isCorrect(e.answer,answer)).sort((a,b)=>a.ts-b.ts);
-    const wrong=unique.filter(e=>!isCorrect(e.answer,answer)).sort((a,b)=>a.ts-b.ts);
-    return{correct,wrong,firstCorrect:correct[0]||null};
+    if(gradingActive){
+      const correct=unique.filter(e=>isCorrect(e.answer,weekData.answer)).sort((a,b)=>a.ts-b.ts);
+      const wrong=unique.filter(e=>!isCorrect(e.answer,weekData.answer)).sort((a,b)=>a.ts-b.ts);
+      return{sorted:[...correct,...wrong],firstCorrect:correct[0]||null};
+    }
+    return{sorted:unique.sort((a,b)=>a.ts-b.ts),firstCorrect:null};
   }
-  const{correct,wrong,firstCorrect}=getSortedEntries(weekData.entries,weekData.answer);
-  const allSorted=[...correct,...wrong];
+  const{sorted:allSorted,firstCorrect}=getSortedEntries(weekData.entries||[]);
 
   async function submitAnswer(){
-    if(!inputOpen) return;
     const errs={};
     if(!sName.trim()) errs.name="Name required";
     if(!sAnswer.trim()) errs.answer="Answer required";
@@ -742,21 +789,39 @@ function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
       const newEntry={id:result.id,name:sName.trim(),answer:sAnswer.trim(),ts};
       setRiddleMap(prev=>({...prev,[week]:{...weekData,entries:[...existingEntries,newEntry]}}));
       setSName("");setSAnswer("");
-      const c=isCorrect(sAnswer.trim(),weekData.answer);
-      setToast({msg:c?`${sName.trim()} got it right! 🎉`:`${sName.trim()} submitted! ✅`,color:c?"#ffd700":"#39ff14"});
+      setToast({msg:`${sName.trim()} submitted! ✅`,color:"#39ff14"});
     } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
+
   async function saveRiddle(){
     if(!newRiddleText.trim()) return;
     setSaving(true);
     try{
-      await window.fbRiddles.setRiddle(week,newRiddleText.trim(),newAnswer.trim().toLowerCase());
-      setRiddleMap(prev=>({...prev,[week]:{...weekData,text:newRiddleText.trim(),answer:newAnswer.trim().toLowerCase()}}));
-      setEditMode(false);setToast({msg:"Riddle & answer saved! ✏️",color:"#39ff14"});
+      // Save riddle text but NOT the answer yet — answer stays hidden until revealed
+      await window.fbRiddles.setRiddle(week,newRiddleText.trim(),"");
+      setRiddleMap(prev=>({...prev,[week]:{...weekData,text:newRiddleText.trim(),answer:"",revealed:false}}));
+      setEditMode(false);
+      setToast({msg:"Riddle saved! Answer hidden until you reveal it. ✏️",color:"#39ff14"});
     } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
+
+  async function revealCorrectAnswer(){
+    if(!revealAnswer.trim()) return;
+    setSaving(true);
+    try{
+      await window.fbRiddles.setRiddle(week,weekData.text,revealAnswer.trim().toLowerCase());
+      // Also write a "revealed" flag
+      await db.ref(`riddles/week_${week}`).update({revealed:true});
+      setRiddleMap(prev=>({...prev,[week]:{...weekData,answer:revealAnswer.trim().toLowerCase(),revealed:true}}));
+      setRevealMode(false);
+      setRevealAnswer("");
+      setToast({msg:"Correct answer revealed! Answers are now graded. 🎉",color:"#ffd700"});
+    } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
+    setSaving(false);
+  }
+
   async function deleteSubmission(entry){
     setSaving(true);
     try{
@@ -778,83 +843,157 @@ function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
             <option key={w} value={w} style={{background:"#0a0a0f"}}>{getWeekLabel(w)}{w===getCurrentWeek()?" ← Current":""}</option>
           ))}
         </select>
+        {/* Grading status badge */}
+        <div style={{padding:"4px 12px",borderRadius:99,
+          background:gradingActive?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.05)",
+          border:`1px solid ${gradingActive?"#ffd70044":"rgba(255,255,255,0.1)"}`,
+          fontFamily:"'Fira Code',monospace",fontSize:9,
+          color:gradingActive?"#ffd700":"rgba(255,255,255,0.35)"}}>
+          {gradingActive?"✅ ANSWER REVEALED — grading active":"🔒 ANSWER HIDDEN — submissions open"}
+        </div>
       </div>
-      <Glass style={{padding:24,marginBottom:24,borderColor:"#ff2d7833",boxShadow:"0 0 40px #ff2d7822,0 8px 32px rgba(0,0,0,0.4)",position:"relative",overflow:"hidden"}}>
+
+      {/* Riddle card */}
+      <Glass style={{padding:24,marginBottom:24,borderColor:"#ff2d7833",
+        boxShadow:"0 0 40px #ff2d7822,0 8px 32px rgba(0,0,0,0.4)",position:"relative",overflow:"hidden"}}>
         <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#ff2d78,#00cfff,#39ff14)"}}/>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:8,flexWrap:"wrap"}}>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>RIDDLE #{week}</span>
           {isAdmin&&(
-            <button onClick={()=>{setEditMode(!editMode);setNewRiddleText(weekData.text);setNewAnswer(weekData.answer||"");}}
-              style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"rgba(255,255,255,0.5)",padding:"5px 12px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
-              {editMode?"✕ Cancel":"✏️ Edit Riddle"}
-            </button>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              <button onClick={()=>{setEditMode(!editMode);setRevealMode(false);setNewRiddleText(weekData.text);}}
+                style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,
+                  color:"rgba(255,255,255,0.5)",padding:"5px 12px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
+                {editMode?"✕ Cancel":"✏️ Edit Riddle"}
+              </button>
+              {!gradingActive&&(
+                <button onClick={()=>{setRevealMode(!revealMode);setEditMode(false);setRevealAnswer(weekData.answer||"");}}
+                  style={{background:revealMode?"rgba(255,45,120,0.1)":"rgba(255,215,0,0.1)",
+                    border:`1px solid ${revealMode?"#ff2d7844":"#ffd70044"}`,borderRadius:8,
+                    color:revealMode?"#ff2d78":"#ffd700",padding:"5px 12px",cursor:"pointer",
+                    fontFamily:"'Fira Code',monospace",fontSize:11}}>
+                  {revealMode?"✕ Cancel":"🔓 Reveal Answer"}
+                </button>
+              )}
+            </div>
           )}
         </div>
+
+        {/* Edit riddle text */}
         {editMode&&isAdmin?(
           <div>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:7,letterSpacing:1}}>RIDDLE TEXT</label>
             <textarea value={newRiddleText} onChange={e=>setNewRiddleText(e.target.value)}
-              style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid #00cfff44",borderRadius:10,padding:"12px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,lineHeight:1.6,outline:"none",resize:"vertical",minHeight:75,boxSizing:"border-box",marginBottom:12}}/>
-            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:7,letterSpacing:1}}>CORRECT ANSWER (admin only)</label>
-            <input value={newAnswer} onChange={e=>setNewAnswer(e.target.value)} placeholder="e.g. echo" style={{...iStyle(false),marginBottom:12}}/>
-            <button onClick={saveRiddle} disabled={saving} style={{padding:"9px 22px",borderRadius:8,border:"none",cursor:"pointer",background:"linear-gradient(135deg,#ff2d78,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,display:"flex",alignItems:"center",gap:8}}>
+              style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid #00cfff44",borderRadius:10,
+                padding:"12px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,lineHeight:1.6,
+                outline:"none",resize:"vertical",minHeight:75,boxSizing:"border-box",marginBottom:12}}/>
+            <div style={{background:"rgba(255,207,0,0.06)",border:"1px solid #ffd70033",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+              <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#ffd700",margin:0,lineHeight:1.6}}>
+                💡 The correct answer is set separately via "Reveal Answer" at the end of the week.<br/>
+                <span style={{color:"rgba(255,255,255,0.35)"}}>Students submit freely — grading only activates once you reveal.</span>
+              </p>
+            </div>
+            <button onClick={saveRiddle} disabled={saving} style={{padding:"9px 22px",borderRadius:8,border:"none",cursor:"pointer",
+              background:"linear-gradient(135deg,#ff2d78,#00cfff)",color:"#000",
+              fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,display:"flex",alignItems:"center",gap:8}}>
               {saving?<><Spinner/> Saving...</>:"SAVE RIDDLE ✓"}
+            </button>
+          </div>
+        ) : revealMode&&isAdmin?(
+          /* Reveal answer panel */
+          <div style={{background:"rgba(255,215,0,0.06)",border:"1px solid #ffd70033",borderRadius:12,padding:"16px 18px"}}>
+            <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"#ffd700",marginBottom:14,lineHeight:1.6}}>
+              🔓 Enter the correct answer below. Once saved, all submissions will be graded and the winner highlighted.
+            </p>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:7,letterSpacing:1}}>CORRECT ANSWER</label>
+            <input value={revealAnswer} onChange={e=>setRevealAnswer(e.target.value)}
+              placeholder="e.g. echo" style={{...iStyle(false),marginBottom:12}}
+              onFocus={e=>e.target.style.borderColor="#ffd700"}
+              onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.15)"}/>
+            <button onClick={revealCorrectAnswer} disabled={saving||!revealAnswer.trim()} style={{padding:"10px 24px",borderRadius:8,border:"none",
+              cursor:saving||!revealAnswer.trim()?"not-allowed":"pointer",
+              background:saving?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#ffd700,#ff8c00)",
+              color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,
+              display:"flex",alignItems:"center",gap:8}}>
+              {saving?<><Spinner/> Saving...</>:"🔓 REVEAL & GRADE ANSWERS"}
             </button>
           </div>
         ):(
           <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:"clamp(13px,1.5vw,18px)",color:"#fff",lineHeight:1.7,margin:0,fontStyle:"italic"}}>"{weekData.text}"</p>
         )}
       </Glass>
+
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:24}}>
+        {/* Submit answer */}
         <Glass style={{padding:22}}>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ff2d78",marginBottom:14,letterSpacing:1}}>SUBMIT YOUR ANSWER</h3>
-          {!inputOpen?(
-            <div style={{padding:"16px",background:"rgba(255,45,120,0.08)",border:"1px solid #ff2d7844",borderRadius:10}}>
-              <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"#ff2d78",textAlign:"center",lineHeight:1.6}}>
-                🔒 Submissions unavailable.<br/><span style={{color:"rgba(255,255,255,0.35)",fontSize:10}}>Check back during session hours.</span>
-              </p>
-            </div>
-          ):(
-            <>
-              <div style={{marginBottom:12}}>
-                <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>STUDENT NAME</label>
-                <input value={sName} onChange={e=>setSName(e.target.value)} placeholder="Your ninja name" style={iStyle(errors.name)}/>
-                {errors.name&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.name}</p>}
-              </div>
-              <div style={{marginBottom:16}}>
-                <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>YOUR ANSWER</label>
-                <textarea value={sAnswer} onChange={e=>setSAnswer(e.target.value)} placeholder="Type your answer here..."
-                  style={{...iStyle(errors.answer),resize:"vertical",minHeight:70}}/>
-                {errors.answer&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.answer}</p>}
-              </div>
-              <button onClick={submitAnswer} disabled={saving} style={{width:"100%",padding:11,borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",
-                background:saving?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#ff2d78,#00cfff)",
-                color:saving?"rgba(255,255,255,0.4)":"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,
-                display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-                {saving?<><Spinner/> Saving...</>:"SUBMIT ANSWER 🧩"}
-              </button>
-            </>
-          )}
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",marginBottom:14,lineHeight:1.6}}>
+            Already answered? Submit again to update.
+          </p>
+          <div style={{marginBottom:12}}>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>STUDENT NAME</label>
+            <input value={sName} onChange={e=>setSName(e.target.value)} placeholder="Your ninja name" style={iStyle(errors.name)}/>
+            {errors.name&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.name}</p>}
+          </div>
+          <div style={{marginBottom:16}}>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>YOUR ANSWER</label>
+            <textarea value={sAnswer} onChange={e=>setSAnswer(e.target.value)} placeholder="Type your answer here..."
+              style={{...iStyle(errors.answer),resize:"vertical",minHeight:70}}/>
+            {errors.answer&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.answer}</p>}
+          </div>
+          <button onClick={submitAnswer} disabled={saving} style={{width:"100%",padding:11,borderRadius:10,border:"none",
+            cursor:saving?"not-allowed":"pointer",
+            background:saving?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#ff2d78,#00cfff)",
+            color:saving?"rgba(255,255,255,0.4)":"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            {saving?<><Spinner/> Saving...</>:"SUBMIT ANSWER 🧩"}
+          </button>
         </Glass>
+
+        {/* Answers list */}
         <div>
-          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#00cfff",marginBottom:12,letterSpacing:1}}>STUDENT ANSWERS ({allSorted.length})</h3>
-          <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:380,overflowY:"auto"}}>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#00cfff",marginBottom:12,letterSpacing:1}}>
+            STUDENT ANSWERS ({allSorted.length})
+          </h3>
+          <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:400,overflowY:"auto"}}>
             {allSorted.length===0?(
-              <Glass style={{padding:22,textAlign:"center"}}><p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.35)",fontSize:13}}>No answers yet — be the first! 🧠</p></Glass>
+              <Glass style={{padding:22,textAlign:"center"}}>
+                <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.35)",fontSize:13}}>No answers yet — be the first! 🧠</p>
+              </Glass>
             ):allSorted.map((a,i)=>{
               const isFirst=firstCorrect&&a.name===firstCorrect.name;
-              const corr=isCorrect(a.answer,weekData.answer);
+              const corr=gradingActive&&isCorrect(a.answer,weekData.answer);
+              // Border: gold for first correct, green for correct, default otherwise
+              const borderCol=isFirst?"#ffd700":corr?"#39ff14":"rgba(255,255,255,0.08)";
               return(
-                <Glass key={i} style={{padding:"11px 14px",borderColor:isFirst?"#ffd700":corr?"#39ff14":"rgba(255,255,255,0.08)",animation:`fadeUp .3s ease both ${i*.05}s`}}>
+                <Glass key={i} style={{padding:"11px 14px",borderColor:borderCol,
+                  animation:`fadeUp .3s ease both ${i*.05}s`,position:"relative"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
-                    <div style={{display:"flex",alignItems:"center",gap:7}}>
+                    <div style={{display:"flex",alignItems:"center",gap:7,flexWrap:"wrap"}}>
                       {isFirst&&<span style={{fontSize:14}}>👑</span>}
-                      <span style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:12,color:isFirst?"#ffd700":corr?"#39ff14":"#00cfff"}}>{a.name}</span>
-                      {isFirst&&<span style={{background:"rgba(255,215,0,0.15)",border:"1px solid #ffd70044",borderRadius:4,padding:"1px 5px",fontFamily:"'Fira Code',monospace",fontSize:8,color:"#ffd700"}}>FIRST CORRECT</span>}
+                      <span style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:12,
+                        color:isFirst?"#ffd700":corr?"#39ff14":"#00cfff"}}>{a.name}</span>
+                      {isFirst&&gradingActive&&(
+                        <span style={{background:"rgba(255,215,0,0.15)",border:"1px solid #ffd70044",
+                          borderRadius:4,padding:"1px 5px",fontFamily:"'Fira Code',monospace",
+                          fontSize:8,color:"#ffd700"}}>FIRST CORRECT</span>
+                      )}
+                      {corr&&!isFirst&&(
+                        <span style={{background:"rgba(57,255,20,0.1)",border:"1px solid #39ff1433",
+                          borderRadius:4,padding:"1px 5px",fontFamily:"'Fira Code',monospace",
+                          fontSize:8,color:"#39ff14"}}>✓ CORRECT</span>
+                      )}
                     </div>
-                    <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)"}}>{new Date(a.ts).toLocaleDateString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
-                      {isAdmin&&<button onClick={()=>deleteSubmission(a)} disabled={saving} style={{background:"rgba(255,45,120,0.1)",border:"1px solid #ff2d7844",borderRadius:6,color:"#ff2d78",padding:"1px 6px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>✕</button>}
+                    <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                      <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)"}}>
+                        {new Date(a.ts).toLocaleDateString("en-US",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}
+                      </span>
+                      {isAdmin&&(
+                        <button onClick={()=>deleteSubmission(a)} disabled={saving}
+                          style={{background:"rgba(255,45,120,0.1)",border:"1px solid #ff2d7844",
+                            borderRadius:6,color:"#ff2d78",padding:"1px 6px",cursor:"pointer",
+                            fontFamily:"'Fira Code',monospace",fontSize:10}}>✕</button>
+                      )}
                     </div>
                   </div>
                   <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.75)",margin:0}}>{a.answer}</p>
