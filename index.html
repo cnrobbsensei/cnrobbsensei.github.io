@@ -1588,7 +1588,21 @@ function App(){
     setLoadStatus("Loading riddles...");
     try{const map=await window.fbRiddles.getAll();setRiddleMap(map);}catch(e){console.warn(e);}
     setLoadStatus("Loading NOTM...");
-    try{const ne=await window.fbNOTM.getAll();setNotmEntries(ne);}catch(e){console.warn(e);}
+    try{
+      let ne=await window.fbNOTM.getAll();
+      // Seed default entries if DB is empty
+      if(ne.length===0){
+        const seed=[
+          {monthKey:"2026-04",name:"Nandish",points:7},
+          {monthKey:"2026-05",name:"Cameron",points:4},
+        ];
+        for(const s of seed){
+          const r=await window.fbNOTM.addEntry(s.monthKey,s.name,s.points);
+          ne.push({id:r.id,...s,ts:Date.now()});
+        }
+      }
+      setNotmEntries(ne);
+    }catch(e){console.warn(e);}
     setLoading(false);
   }
 
