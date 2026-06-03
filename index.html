@@ -133,6 +133,19 @@ window.fbNOTM = {
     await db.ref(`notm/${entryId}`).remove();
   }
 };
+
+window.fbUsernames = {
+  async check(username){
+    // Returns the stored username string if found, null otherwise
+    const snap = await db.ref("usernames").orderByValue().equalTo(username.trim()).once("value");
+    const val = snap.val();
+    if(val) return username.trim();
+    // Also try matching as a key
+    const snap2 = await db.ref("usernames/" + username.trim()).once("value");
+    if(snap2.exists()) return username.trim();
+    return null;
+  }
+};
 </script>
 <script type="text/babel">
 const {useState,useEffect,useRef,useCallback} = React;
@@ -141,7 +154,7 @@ const ADMIN_PASS = "Senseis";
 const MAX_ATTEMPTS_PER_DAY = 3;
 
 // ── Week utils ──────────────────────────────────────────────────────────────
-const WEEK_START = new Date("2026-05-14T00:00:00"); // weeks start on Thursdays
+const WEEK_START = new Date("2026-05-28T00:00:00"); // weeks start on Thursdays
 function getCurrentWeek(){
   const diff = new Date() - WEEK_START;
   return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
@@ -294,14 +307,21 @@ function iStyle(err){
 
 // ── Mobile nav ──────────────────────────────────────────────────────────────
 const NAV=[{id:"home",icon:"🏠",label:"Home"},{id:"leaderboards",icon:"🏆",label:"Ring Toss"},{id:"riddle",icon:"🧩",label:"Riddle"},{id:"notm",icon:"⭐",label:"NOTM"}];
-function MobileNav({active,onNav,isAdmin,onLogout}){
+function MobileNav({active,onNav,isAdmin,isStudent,studentUsername,onLogout}){
   const [open,setOpen]=useState(false);
   return(
     <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{padding:"3px 8px",borderRadius:99,background:isAdmin?"rgba(57,255,20,0.12)":"rgba(0,207,255,0.1)",border:`1px solid ${isAdmin?"#39ff1444":"#00cfff44"}`,fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":"#00cfff"}}>{isAdmin?"🔐 ADMIN":"👀 GUEST"}</div>
+          <div style={{padding:"3px 8px",borderRadius:99,
+            background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+            border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,
+            color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
+          </div>
           <button onClick={()=>setOpen(!open)} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",padding:"6px 10px",cursor:"pointer",fontSize:16}}>{open?"✕":"☰"}</button>
         </div>
       </div>
@@ -324,7 +344,7 @@ function MobileNav({active,onNav,isAdmin,onLogout}){
 }
 
 // ── Desktop sidebar ─────────────────────────────────────────────────────────
-function Sidebar({active,onNav,isAdmin,onLogout}){
+function Sidebar({active,onNav,isAdmin,isStudent,studentUsername,onLogout}){
   return(
     <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",padding:"22px 14px",gap:6,
       background:"rgba(0,0,0,0.35)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
@@ -334,10 +354,12 @@ function Sidebar({active,onNav,isAdmin,onLogout}){
         <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
         <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
         <div style={{display:"inline-flex",alignItems:"center",gap:5,
-          background:isAdmin?"rgba(57,255,20,0.12)":"rgba(0,207,255,0.1)",
-          border:`1px solid ${isAdmin?"#39ff1444":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
-          <span style={{fontSize:10}}>{isAdmin?"🔐":"👀"}</span>
-          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":"#00cfff",letterSpacing:1}}>{isAdmin?"ADMIN":"GUEST"}</span>
+          background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+          border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
+          <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",letterSpacing:1,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"ADMIN":isStudent?studentUsername:"GUEST"}
+          </span>
         </div>
       </div>
       {NAV.map(item=>(
@@ -764,12 +786,14 @@ function LeaderboardsTab({allEntries,setAllEntries,setToast,isAdmin}){
 }
 
 // ── Riddle Tab ──────────────────────────────────────────────────────────────
-function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
+function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRiddleMap}){
   const cw = getCurrentWeek();
   const totalWeeks = getCurrentWeek()+1;
   const [week,setWeek] = useState(cw);
-  const [sName,setSName] = useState("");
+  const [sName,setSName] = useState(studentUsername||"");
   const [sAnswer,setSAnswer] = useState("");
+  // Keep sName in sync if studentUsername changes (e.g. tab switch)
+  useEffect(()=>{if(studentUsername) setSName(studentUsername);},[studentUsername]);
   const [newRiddleText,setNewRiddleText] = useState("");
   const [editMode,setEditMode] = useState(false);
   const [revealMode,setRevealMode] = useState(false);
@@ -785,8 +809,8 @@ function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
   const gradingActive = weekData.revealed && !!weekData.answer;
   const isLocked = weekData.locked;
 
-  // Submissions are only allowed on the current week
-  const canSubmit = isCurrentWeek;
+  // Students can submit only on current week; guests cannot submit
+  const canSubmit = isCurrentWeek && (isAdmin || isStudent);
 
   function isCorrect(submitted, official){
     if(!official || !gradingActive) return false;
@@ -1100,8 +1124,8 @@ function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
       {/* ── Submit + Answers grid ── */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:24}}>
 
-        {/* Submit panel — only shown for current week */}
-        {isCurrentWeek?(
+        {/* Submit panel — admin/student on current week only; guests always see closed */}
+        {isCurrentWeek && (isAdmin || isStudent)?(
           <Glass style={{padding:22}}>
             <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ff2d78",marginBottom:14,letterSpacing:1}}>
               SUBMIT YOUR ANSWER
@@ -1112,7 +1136,17 @@ function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
             <div style={{marginBottom:12}}>
               <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,
                 color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>STUDENT NAME</label>
-              <input value={sName} onChange={e=>setSName(e.target.value)} placeholder="Your ninja name" style={iStyle(errors.name)}/>
+              <input value={sName}
+                onChange={e=>{if(!studentUsername) setSName(e.target.value);}}
+                readOnly={!!studentUsername}
+                placeholder="Your ninja name"
+                style={{...iStyle(errors.name),
+                  cursor:studentUsername?"default":"text",
+                  opacity:studentUsername?0.75:1,
+                  background:studentUsername?"rgba(57,255,20,0.06)":"rgba(255,255,255,0.06)",
+                  borderColor:studentUsername?"#39ff1444":undefined
+                }}/>
+              {studentUsername&&<p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#39ff14",marginTop:3}}>🔐 Locked to your username</p>}
               {errors.name&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.name}</p>}
             </div>
             <div style={{marginBottom:16}}>
@@ -1132,16 +1166,19 @@ function RiddleTab({setToast,isAdmin,riddleMap,setRiddleMap}){
             </button>
           </Glass>
         ):(
-          <Glass style={{padding:22,borderColor:"rgba(255,255,255,0.06)",opacity:.7}}>
+          <Glass style={{padding:22,borderColor:"rgba(255,255,255,0.06)",opacity:.65}}>
             <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"rgba(255,255,255,0.3)",marginBottom:14,letterSpacing:1}}>
               SUBMIT YOUR ANSWER
             </h3>
             <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
               height:120,gap:10}}>
-              <span style={{fontSize:28}}>📅</span>
+              <span style={{fontSize:28}}>{!isAdmin&&!isStudent?"🔒":"📅"}</span>
               <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)",
                 textAlign:"center",lineHeight:1.6}}>
-                This week has ended.<br/>Submissions are closed.
+                {!isAdmin&&!isStudent
+                  ?<>Guest access.<br/>Log in with your username to submit.</>
+                  :<>This week has ended.<br/>Submissions are closed.</>
+                }
               </p>
             </div>
           </Glass>
@@ -1495,10 +1532,32 @@ function LoginScreen({onLogin}){
   const [show,setShow]=useState(false);
   const [shake,setShake]=useState(false);
   const [hint,setHint]=useState("");
-  function attempt(){
-    if(pw===ADMIN_PASS){onLogin("admin");}
-    else if(pw.trim()===""){setHint("Enter the admin password or use Guest below.");setShake(true);setTimeout(()=>setShake(false),500);}
-    else{onLogin("guest");}
+  const [checking,setChecking]=useState(false);
+
+  async function attempt(){
+    const trimmed = pw.trim();
+    if(trimmed===""){
+      setHint("Enter your username or the Sensei password.");
+      setShake(true);setTimeout(()=>setShake(false),500);
+      return;
+    }
+    // Admin check first
+    if(trimmed===ADMIN_PASS){onLogin("admin",null);return;}
+    // Check Firebase usernames
+    setChecking(true);setHint("");
+    try{
+      const matched = await window.fbUsernames.check(trimmed);
+      if(matched){
+        onLogin("student",matched);
+      } else {
+        // Not admin, not a valid username → guest
+        onLogin("guest",null);
+      }
+    } catch(e){
+      console.warn("Username check failed:",e);
+      onLogin("guest",null);
+    }
+    setChecking(false);
   }
   return(
     <div style={{position:"fixed",inset:0,display:"flex",alignItems:"center",justifyContent:"center",
@@ -1512,12 +1571,12 @@ function LoginScreen({onLogin}){
         </div>
         <Glass style={{padding:"clamp(20px,4vw,32px)",borderColor:"rgba(57,255,20,0.15)",animation:shake?"shakeCard .5s ease":"none"}}>
           <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,color:"#fff",textAlign:"center",marginBottom:5,letterSpacing:1}}>WELCOME BACK</h2>
-          <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.4)",textAlign:"center",marginBottom:24}}>Admin password for full access, or continue as guest</p>
+          <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.4)",textAlign:"center",marginBottom:24}}>Enter your username for student access, Sensei password for admin, or continue as guest</p>
           <div style={{marginBottom:8}}>
-            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:7,letterSpacing:1.5}}>PASSWORD</label>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:7,letterSpacing:1.5}}>USERNAME / PASSWORD</label>
             <div style={{position:"relative"}}>
               <input value={pw} onChange={e=>{setPw(e.target.value);setHint("");}} onKeyDown={e=>e.key==="Enter"&&attempt()}
-                type={show?"text":"password"} placeholder="Enter admin password..."
+                type={show?"text":"password"} placeholder="Username or Sensei password..."
                 style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,
                   padding:"12px 42px 12px 14px",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:14,outline:"none",boxSizing:"border-box",letterSpacing:pw&&!show?3:1}}
                 onFocus={e=>e.target.style.borderColor="#39ff14"}
@@ -1526,11 +1585,11 @@ function LoginScreen({onLogin}){
             </div>
             {hint&&<p style={{color:"#ff2d78",fontSize:11,marginTop:5,fontFamily:"'Fira Code',monospace"}}>{hint}</p>}
           </div>
-          <button onClick={attempt} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",cursor:"pointer",
-            background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,letterSpacing:1.5,marginTop:16,transition:"transform .2s,opacity .2s"}}
+          <button onClick={attempt} disabled={checking} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",cursor:checking?"not-allowed":"pointer",
+            background:checking?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#39ff14,#00cfff)",color:checking?"rgba(255,255,255,0.4)":"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,letterSpacing:1.5,marginTop:16,transition:"transform .2s,opacity .2s"}}
             onMouseEnter={e=>{e.target.style.transform="scale(1.02)";e.target.style.opacity=".92";}}
             onMouseLeave={e=>{e.target.style.transform="none";e.target.style.opacity="1";}}>
-            ENTER DOJO ⚡
+            {checking?<><Spinner/> CHECKING...</>:"ENTER DOJO ⚡"}
           </button>
           <div style={{display:"flex",alignItems:"center",gap:10,margin:"18px 0"}}>
             <div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/>
@@ -1543,7 +1602,7 @@ function LoginScreen({onLogin}){
             👀 Continue as Guest (View Only)
           </button>
           <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.2)",textAlign:"center",marginTop:16,lineHeight:1.6}}>
-            Guests can view leaderboards &amp; riddles.<br/>Admin required to enter scores.
+            Students: enter your username · Sensei: enter Senseis<br/>Guests can view but not interact.
           </p>
         </Glass>
       </div>
@@ -1572,6 +1631,7 @@ function useIsMobile(){
 // ── App Root ────────────────────────────────────────────────────────────────
 function App(){
   const [role,setRole]=useState(null);
+  const [studentUsername,setStudentUsername]=useState(null);
   const [tab,setTab]=useState("home");
   const [allEntries,setAllEntries]=useState([]);
   const [riddleMap,setRiddleMap]=useState({});
@@ -1580,6 +1640,7 @@ function App(){
   const [loading,setLoading]=useState(true);
   const [loadStatus,setLoadStatus]=useState("Connecting to Firebase...");
   const isAdmin=role==="admin";
+  const isStudent=role==="student";
   const isMobile=useIsMobile();
 
   async function loadData(){
@@ -1614,7 +1675,7 @@ function App(){
   },[role]);
 
   if(loading) return <LoadingScreen status={loadStatus}/>;
-  if(!role) return <LoginScreen onLogin={r=>setRole(r)}/>;
+  if(!role) return <LoginScreen onLogin={(r,u)=>{setRole(r);setStudentUsername(u);}}/>;
 
   return(
     <>
@@ -1622,13 +1683,13 @@ function App(){
         background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
       <div style={{display:"flex",flexDirection:isMobile?"column":"row",minHeight:"100vh",position:"relative",zIndex:1}}>
         {isMobile
-          ?<MobileNav active={tab} onNav={setTab} isAdmin={isAdmin} onLogout={()=>setRole(null)}/>
-          :<Sidebar active={tab} onNav={setTab} isAdmin={isAdmin} onLogout={()=>setRole(null)}/>
+          ?<MobileNav active={tab} onNav={setTab} isAdmin={isAdmin} isStudent={isStudent} studentUsername={studentUsername} onLogout={()=>setRole(null)}/>
+          :<Sidebar active={tab} onNav={setTab} isAdmin={isAdmin} isStudent={isStudent} studentUsername={studentUsername} onLogout={()=>setRole(null)}/>
         }
         <div key={tab} style={{flex:1,overflowY:"auto",animation:"fadeUp .35s ease both",...(isMobile?{}:{height:"100vh"})}}>
           {tab==="home"&&<HomeTab onNav={setTab} allEntries={allEntries}/>}
           {tab==="leaderboards"&&<LeaderboardsTab allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast} isAdmin={isAdmin}/>}
-          {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>}
+          {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin} isStudent={isStudent} studentUsername={studentUsername} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>}
           {tab==="notm"&&<NOTMTab isAdmin={isAdmin} notmEntries={notmEntries} setNotmEntries={setNotmEntries} setToast={setToast}/>}
         </div>
       </div>
