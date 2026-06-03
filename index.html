@@ -154,7 +154,7 @@ const ADMIN_PASS = "Senseis";
 const MAX_ATTEMPTS_PER_DAY = 3;
 
 // ── Week utils ──────────────────────────────────────────────────────────────
-const WEEK_START = new Date("2026-05-28T00:00:00"); // weeks start on Thursdays
+const WEEK_START = new Date("2026-05-14T00:00:00"); // weeks start on Thursdays
 function getCurrentWeek(){
   const diff = new Date() - WEEK_START;
   return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
