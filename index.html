@@ -146,6 +146,42 @@ window.fbUsernames = {
     return null;
   }
 };
+
+window.fbPolls = {
+  async getAll(){
+    const snap = await db.ref("polls").once("value");
+    const val = snap.val() || {};
+    const polls = [];
+    for(const [id,p] of Object.entries(val)){
+      const votes = p.votes || {};
+      const voteList = Object.entries(votes).map(([voterId,optIdx])=>({voterId,optIdx}));
+      polls.push({
+        id,
+        title:p.title||"",
+        options:p.options||[],
+        status:p.status||"pending", // pending | approved | denied
+        createdBy:p.createdBy||"Unknown",
+        ts:p.ts||0,
+        votes:voteList
+      });
+    }
+    return polls;
+  },
+  async createPoll(title,options,createdBy){
+    const ref = db.ref("polls").push();
+    await ref.set({title,options,status:"pending",createdBy,ts:Date.now()});
+    return {id:ref.key};
+  },
+  async setStatus(pollId,status){
+    await db.ref(`polls/${pollId}`).update({status});
+  },
+  async deletePoll(pollId){
+    await db.ref(`polls/${pollId}`).remove();
+  },
+  async vote(pollId,voterId,optIdx){
+    await db.ref(`polls/${pollId}/votes/${voterId}`).set(optIdx);
+  }
+};
 </script>
 <script type="text/babel">
 const {useState,useEffect,useRef,useCallback} = React;
@@ -306,7 +342,7 @@ function iStyle(err){
 }
 
 // ── Mobile nav ──────────────────────────────────────────────────────────────
-const NAV=[{id:"home",icon:"🏠",label:"Home"},{id:"leaderboards",icon:"🏆",label:"Ring Toss"},{id:"riddle",icon:"🧩",label:"Riddle"},{id:"notm",icon:"⭐",label:"NOTM"}];
+const NAV=[{id:"home",icon:"🏠",label:"Home"},{id:"leaderboards",icon:"🏆",label:"Ring Toss"},{id:"riddle",icon:"🧩",label:"Riddle"},{id:"notm",icon:"⭐",label:"NOTM"},{id:"polls",icon:"📊",label:"Polls"}];
 function MobileNav({active,onNav,isAdmin,isStudent,studentUsername,onLogout}){
   const [open,setOpen]=useState(false);
   return(
@@ -1526,6 +1562,381 @@ function NOTMTab({isAdmin,notmEntries,setNotmEntries,setToast}){
   );
 }
 
+// ── Polls Tab ────────────────────────────────────────────────────────────────
+function PollsTab({isAdmin,isStudent,studentUsername,pollsData,setPollsData,setToast}){
+  const [view,setView] = useState("results"); // results | create | pending (admin)
+  const [title,setTitle] = useState("");
+  const [options,setOptions] = useState(["",""]);
+  const [errors,setErrors] = useState({});
+  const [saving,setSaving] = useState(false);
+  const [actionId,setActionId] = useState(null);
+
+  // Determine a stable voterId for this session — student username, or a guest-local id stored in memory
+  const voterId = isStudent ? studentUsername : (isAdmin ? "ADMIN" : null);
+
+  const approvedPolls = pollsData.filter(p=>p.status==="approved").sort((a,b)=>b.ts-a.ts);
+  const pendingPolls  = pollsData.filter(p=>p.status==="pending").sort((a,b)=>a.ts-b.ts);
+
+  const PODIUM = ["#39ff14","#00cfff","#ff2d78","#ffd700","#bf5fff","#ff8c00","#00ff9d"];
+
+  // ── Create poll ──────────────────────────────────────────────────────────
+  function updateOption(i,val){
+    const next=[...options]; next[i]=val; setOptions(next);
+  }
+  function addOption(){
+    if(options.length>=7) return;
+    setOptions([...options,""]);
+  }
+  function removeOption(i){
+    if(options.length<=2) return;
+    setOptions(options.filter((_,idx)=>idx!==i));
+  }
+
+  async function submitPoll(){
+    const errs={};
+    if(!title.trim()) errs.title="Poll title is required";
+    const filled = options.map(o=>o.trim()).filter(Boolean);
+    if(filled.length<2) errs.options="At least 2 options are required";
+    if(Object.keys(errs).length){setErrors(errs);return;}
+    setErrors({});setSaving(true);
+    try{
+      const creator = isStudent ? studentUsername : (isAdmin ? "Sensei" : "Unknown");
+      const result = await window.fbPolls.createPoll(title.trim(),filled,creator);
+      setPollsData(prev=>[...prev,{id:result.id,title:title.trim(),options:filled,status:"pending",createdBy:creator,ts:Date.now(),votes:[]}]);
+      setTitle("");setOptions(["",""]);setView("results");
+      setToast({msg:"Poll sent for admin approval! 📊",color:"#00cfff"});
+    } catch(e){setToast({msg:`Failed: ${e.message}`,color:"#ff2d78"});}
+    setSaving(false);
+  }
+
+  // ── Admin approve/deny ───────────────────────────────────────────────────
+  async function approvePoll(pollId){
+    setActionId(pollId);
+    try{
+      await window.fbPolls.setStatus(pollId,"approved");
+      setPollsData(prev=>prev.map(p=>p.id===pollId?{...p,status:"approved"}:p));
+      setToast({msg:"Poll approved! Now live for everyone. ✅",color:"#39ff14"});
+    } catch(e){setToast({msg:`Failed: ${e.message}`,color:"#ff2d78"});}
+    setActionId(null);
+  }
+  async function denyPoll(pollId){
+    setActionId(pollId);
+    try{
+      await window.fbPolls.deletePoll(pollId);
+      setPollsData(prev=>prev.filter(p=>p.id!==pollId));
+      setToast({msg:"Poll denied and removed.",color:"#ff2d78"});
+    } catch(e){setToast({msg:`Failed: ${e.message}`,color:"#ff2d78"});}
+    setActionId(null);
+  }
+
+  // ── Voting ───────────────────────────────────────────────────────────────
+  async function castVote(poll,optIdx){
+    if(!voterId) return; // guests can't vote
+    setActionId(poll.id);
+    try{
+      await window.fbPolls.vote(poll.id,voterId,optIdx);
+      setPollsData(prev=>prev.map(p=>{
+        if(p.id!==poll.id) return p;
+        const otherVotes = p.votes.filter(v=>v.voterId!==voterId);
+        return {...p,votes:[...otherVotes,{voterId,optIdx}]};
+      }));
+      setToast({msg:"Vote cast! 🗳️",color:"#39ff14"});
+    } catch(e){setToast({msg:`Vote failed: ${e.message}`,color:"#ff2d78"});}
+    setActionId(null);
+  }
+
+  function getMyVote(poll){
+    if(!voterId) return null;
+    const v = poll.votes.find(v=>v.voterId===voterId);
+    return v?v.optIdx:null;
+  }
+
+  function getCounts(poll){
+    const counts = poll.options.map(()=>0);
+    poll.votes.forEach(v=>{ if(counts[v.optIdx]!==undefined) counts[v.optIdx]++; });
+    const total = counts.reduce((s,c)=>s+c,0);
+    return {counts,total};
+  }
+
+  // ── Poll result card (used by everyone) ──────────────────────────────────
+  function PollCard({poll,index}){
+    const {counts,total} = getCounts(poll);
+    const myVote = getMyVote(poll);
+    const canVote = !!voterId && myVote===null;
+    const showResults = myVote!==null || isAdmin; // once voted (or admin), show bars; otherwise show vote buttons
+
+    return(
+      <Glass style={{padding:22,marginBottom:16,borderColor:"rgba(255,255,255,0.1)",
+        animation:`fadeUp .4s ease both ${index*.06}s`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:8,flexWrap:"wrap"}}>
+          <h3 style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:15,color:"#fff",margin:0}}>
+            📊 {poll.title}
+          </h3>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",whiteSpace:"nowrap"}}>
+            by {poll.createdBy} · {total} vote{total!==1?"s":""}
+          </span>
+        </div>
+
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          {poll.options.map((opt,i)=>{
+            const c = counts[i];
+            const pct = total>0 ? Math.round((c/total)*100) : 0;
+            const isMine = myVote===i;
+            const color = PODIUM[i%PODIUM.length];
+
+            if(!showResults){
+              // Show as clickable vote button (WhatsApp-style bar, unfilled)
+              return(
+                <button key={i} onClick={()=>castVote(poll,i)} disabled={!canVote||actionId===poll.id}
+                  style={{
+                    position:"relative",width:"100%",textAlign:"left",
+                    padding:"13px 16px",borderRadius:10,
+                    border:`1px solid ${color}44`,
+                    background:"rgba(255,255,255,0.04)",
+                    cursor:canVote?"pointer":"not-allowed",
+                    color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:13,fontWeight:600,
+                    transition:"all .15s",overflow:"hidden"
+                  }}
+                  onMouseEnter={e=>{if(canVote){e.currentTarget.style.background=`${color}22`;e.currentTarget.style.borderColor=color;}}}
+                  onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.04)";e.currentTarget.style.borderColor=`${color}44`;}}>
+                  {opt}
+                </button>
+              );
+            }
+
+            // Show as result bar (WhatsApp-poll style, filled by percentage)
+            return(
+              <div key={i} style={{position:"relative"}}>
+                <div style={{
+                  position:"relative",width:"100%",borderRadius:10,overflow:"hidden",
+                  border:`1px solid ${isMine?color:"rgba(255,255,255,0.1)"}`,
+                  background:"rgba(255,255,255,0.04)",
+                  boxShadow:isMine?`0 0 16px ${color}44`:"none"
+                }}>
+                  {/* Fill bar */}
+                  <div style={{
+                    position:"absolute",top:0,left:0,bottom:0,
+                    width:`${pct}%`,background:`linear-gradient(90deg,${color}55,${color}33)`,
+                    transition:"width .6s ease"
+                  }}/>
+                  {/* Content row */}
+                  <div style={{position:"relative",display:"flex",justifyContent:"space-between",alignItems:"center",
+                    padding:"12px 16px",zIndex:1}}>
+                    <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,fontWeight:600,color:"#fff",
+                      display:"flex",alignItems:"center",gap:6}}>
+                      {isMine&&<span style={{fontSize:12}}>✓</span>}
+                      {opt}
+                    </span>
+                    <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:700,color}}>
+                      {pct}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {!voterId&&(
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",marginTop:12,textAlign:"center"}}>
+            👀 Log in with your username to vote
+          </p>
+        )}
+        {myVote!==null&&(
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14",marginTop:12,textAlign:"center"}}>
+            ✓ You voted — results shown above
+          </p>
+        )}
+      </Glass>
+    );
+  }
+
+  return(
+    <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
+
+      {/* ── Header + view tabs ── */}
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28,flexWrap:"wrap"}}>
+        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,22px)",
+          color:"#fff",margin:0,
+          background:"linear-gradient(135deg,#00cfff,#39ff14)",
+          WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
+          📊 Polls
+        </h2>
+
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button onClick={()=>setView("results")} style={{padding:"8px 16px",borderRadius:99,border:"none",cursor:"pointer",
+            fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",
+            background:view==="results"?"linear-gradient(135deg,#00cfff,#39ff14)":"rgba(255,255,255,0.07)",
+            color:view==="results"?"#000":"rgba(255,255,255,0.6)"}}>
+            Live Polls
+          </button>
+
+          {(isStudent||isAdmin)&&(
+            <button onClick={()=>setView("create")} style={{padding:"8px 16px",borderRadius:99,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",
+              background:view==="create"?"linear-gradient(135deg,#00cfff,#39ff14)":"rgba(255,255,255,0.07)",
+              color:view==="create"?"#000":"rgba(255,255,255,0.6)"}}>
+              + Create Poll
+            </button>
+          )}
+
+          {isAdmin&&(
+            <button onClick={()=>setView("pending")} style={{padding:"8px 16px",borderRadius:99,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",position:"relative",
+              background:view==="pending"?"linear-gradient(135deg,#ffd700,#ff8c00)":"rgba(255,255,255,0.07)",
+              color:view==="pending"?"#000":"rgba(255,255,255,0.6)"}}>
+              🔔 Pending {pendingPolls.length>0&&`(${pendingPolls.length})`}
+            </button>
+          )}
+        </div>
+
+        {!isStudent&&!isAdmin&&(
+          <div style={{padding:"7px 14px",borderRadius:99,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)"}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)"}}>👀 Guest — results only</span>
+          </div>
+        )}
+      </div>
+
+      {/* ══ VIEW: LIVE RESULTS (everyone) ══ */}
+      {view==="results"&&(
+        approvedPolls.length===0?(
+          <Glass style={{padding:40,textAlign:"center"}}>
+            <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>
+              No live polls yet.{(isStudent||isAdmin)?" Create one to get started! 📊":""}
+            </p>
+          </Glass>
+        ):(
+          <div>
+            {approvedPolls.map((poll,i)=>(
+              <PollCard key={poll.id} poll={poll} index={i}/>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ══ VIEW: CREATE (student/admin) ══ */}
+      {view==="create"&&(isStudent||isAdmin)&&(
+        <Glass style={{padding:26,borderColor:"#00cfff33",background:"rgba(0,207,255,0.04)"}}>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,color:"#00cfff",marginBottom:6,letterSpacing:1}}>
+            CREATE A NEW POLL
+          </h3>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:20,lineHeight:1.6}}>
+            Your poll will be sent to the Sensei for approval before it goes live.
+          </p>
+
+          <div style={{marginBottom:18}}>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,
+              color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>POLL TITLE</label>
+            <input value={title} onChange={e=>{setTitle(e.target.value);setErrors({});}}
+              placeholder="e.g. What should next week's riddle theme be?"
+              style={iStyle(errors.title)}
+              onFocus={e=>e.target.style.borderColor="#00cfff"}
+              onBlur={e=>e.target.style.borderColor=errors.title?"#ff2d78":"rgba(255,255,255,0.15)"}/>
+            {errors.title&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.title}</p>}
+          </div>
+
+          <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,
+            color:"rgba(255,255,255,0.45)",marginBottom:10,letterSpacing:1}}>
+            OPTIONS (2–7)
+          </label>
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
+            {options.map((opt,i)=>(
+              <div key={i} style={{display:"flex",gap:8,alignItems:"center"}}>
+                <div style={{width:28,height:28,borderRadius:8,flexShrink:0,
+                  background:"rgba(0,207,255,0.1)",border:"1px solid #00cfff33",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontFamily:"'Fira Code',monospace",fontSize:11,color:"#00cfff"}}>
+                  {i+1}
+                </div>
+                <input value={opt} onChange={e=>updateOption(i,e.target.value)}
+                  placeholder={`Option ${i+1}`} style={iStyle(false)}/>
+                {options.length>2&&(
+                  <button onClick={()=>removeOption(i)}
+                    style={{flexShrink:0,background:"rgba(255,45,120,0.1)",border:"1px solid #ff2d7844",
+                      borderRadius:8,color:"#ff2d78",padding:"8px 11px",cursor:"pointer",fontSize:13}}>
+                    ✕
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {errors.options&&<p style={{color:"#ff2d78",fontSize:11,marginBottom:14,fontFamily:"'Fira Code',monospace"}}>{errors.options}</p>}
+
+          {options.length<7&&(
+            <button onClick={addOption} style={{marginBottom:20,padding:"8px 18px",borderRadius:8,
+              border:"1px dashed rgba(255,255,255,0.25)",background:"rgba(255,255,255,0.03)",
+              color:"rgba(255,255,255,0.5)",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
+              + Add another option
+            </button>
+          )}
+
+          <button onClick={submitPoll} disabled={saving}
+            style={{width:"100%",padding:13,borderRadius:10,border:"none",cursor:saving?"not-allowed":"pointer",
+              background:saving?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#00cfff,#39ff14)",
+              color:saving?"rgba(255,255,255,0.3)":"#000",
+              fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,
+              display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+            {saving?<><Spinner/> SENDING...</>:"📤 SEND FOR APPROVAL"}
+          </button>
+        </Glass>
+      )}
+
+      {/* ══ VIEW: PENDING APPROVAL (admin only) ══ */}
+      {view==="pending"&&isAdmin&&(
+        pendingPolls.length===0?(
+          <Glass style={{padding:40,textAlign:"center"}}>
+            <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>
+              No pending polls to review. 🎉
+            </p>
+          </Glass>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:16}}>
+            {pendingPolls.map((poll,i)=>(
+              <Glass key={poll.id} style={{padding:22,borderColor:"#ffd70033",
+                background:"rgba(255,215,0,0.04)",animation:`fadeUp .35s ease both ${i*.06}s`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                  <h3 style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:15,color:"#fff",margin:0}}>
+                    {poll.title}
+                  </h3>
+                  <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,215,0,0.5)"}}>
+                    by {poll.createdBy}
+                  </span>
+                </div>
+                <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:18}}>
+                  {poll.options.map((opt,oi)=>(
+                    <div key={oi} style={{padding:"9px 14px",borderRadius:8,
+                      background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",
+                      fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.8)"}}>
+                      {oi+1}. {opt}
+                    </div>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:10}}>
+                  <button onClick={()=>approvePoll(poll.id)} disabled={actionId===poll.id}
+                    style={{flex:1,padding:11,borderRadius:9,border:"none",cursor:"pointer",
+                      background:actionId===poll.id?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                      color:actionId===poll.id?"rgba(255,255,255,0.3)":"#000",
+                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,
+                      display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                    {actionId===poll.id?<Spinner/>:"✓ APPROVE"}
+                  </button>
+                  <button onClick={()=>denyPoll(poll.id)} disabled={actionId===poll.id}
+                    style={{flex:1,padding:11,borderRadius:9,
+                      border:"1px solid #ff2d7844",cursor:"pointer",
+                      background:"rgba(255,45,120,0.1)",color:"#ff2d78",
+                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+                    ✕ DENY
+                  </button>
+                </div>
+              </Glass>
+            ))}
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
 // ── Login Screen ────────────────────────────────────────────────────────────
 function LoginScreen({onLogin}){
   const [pw,setPw]=useState("");
@@ -1636,6 +2047,7 @@ function App(){
   const [allEntries,setAllEntries]=useState([]);
   const [riddleMap,setRiddleMap]=useState({});
   const [notmEntries,setNotmEntries]=useState([]);
+  const [pollsData,setPollsData]=useState([]);
   const [toast,setToast]=useState(null);
   const [loading,setLoading]=useState(true);
   const [loadStatus,setLoadStatus]=useState("Connecting to Firebase...");
@@ -1664,6 +2076,8 @@ function App(){
       }
       setNotmEntries(ne);
     }catch(e){console.warn(e);}
+    setLoadStatus("Loading polls...");
+    try{const pd=await window.fbPolls.getAll();setPollsData(pd);}catch(e){console.warn(e);}
     setLoading(false);
   }
 
@@ -1691,6 +2105,7 @@ function App(){
           {tab==="leaderboards"&&<LeaderboardsTab allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast} isAdmin={isAdmin}/>}
           {tab==="riddle"&&<RiddleTab setToast={setToast} isAdmin={isAdmin} isStudent={isStudent} studentUsername={studentUsername} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>}
           {tab==="notm"&&<NOTMTab isAdmin={isAdmin} notmEntries={notmEntries} setNotmEntries={setNotmEntries} setToast={setToast}/>}
+          {tab==="polls"&&<PollsTab isAdmin={isAdmin} isStudent={isStudent} studentUsername={studentUsername} pollsData={pollsData} setPollsData={setPollsData} setToast={setToast}/>}
         </div>
       </div>
       {toast&&<Toast msg={toast.msg} color={toast.color||"#39ff14"} onDone={()=>setToast(null)}/>}
