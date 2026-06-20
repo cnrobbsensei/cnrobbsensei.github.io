@@ -136,16 +136,26 @@ window.fbNOTM = {
 
 window.fbUsernames = {
   async check(username){
-    // Returns the stored username string if found, null otherwise
-    const snap = await db.ref("usernames").orderByValue().equalTo(username.trim()).once("value");
-    const val = snap.val();
-    if(val) return username.trim();
-    // Also try matching as a key
-    const snap2 = await db.ref("usernames/" + username.trim()).once("value");
-    if(snap2.exists()) return username.trim();
+    // Case-insensitive match. Returns the ORIGINAL stored username (proper casing) if found, null otherwise.
+    const trimmedLower = username.trim().toLowerCase();
+    if(!trimmedLower) return null;
+    const snap = await db.ref("usernames").once("value");
+    const val = snap.val() || {};
+    // val can be stored either as { key: "Name" } (value-based) or { Name: true } (key-based)
+    for(const [key,storedVal] of Object.entries(val)){
+      // Match against the key (e.g. usernames/Nathan.Farparan: true)
+      if(key.toLowerCase() === trimmedLower) return key;
+      // Match against the value (e.g. usernames/0: "Nathan.Farparan")
+      if(typeof storedVal === "string" && storedVal.toLowerCase() === trimmedLower) return storedVal;
+    }
     return null;
   }
 };
+
+function sanitizeFirebaseKey(str){
+  // Firebase RTDB keys can't contain . # $ [ ] / or whitespace at edges
+  return String(str).trim().replace(/[.#$\[\]\/]/g, "_");
+}
 
 window.fbPolls = {
   async getAll(){
@@ -179,7 +189,8 @@ window.fbPolls = {
     await db.ref(`polls/${pollId}`).remove();
   },
   async vote(pollId,voterId,optIdx){
-    await db.ref(`polls/${pollId}/votes/${voterId}`).set(optIdx);
+    const safeId = sanitizeFirebaseKey(voterId);
+    await db.ref(`polls/${pollId}/votes/${safeId}`).set(optIdx);
   }
 };
 </script>
@@ -1572,7 +1583,11 @@ function PollsTab({isAdmin,isStudent,studentUsername,pollsData,setPollsData,setT
   const [actionId,setActionId] = useState(null);
 
   // Determine a stable voterId for this session — student username, or a guest-local id stored in memory
-  const voterId = isStudent ? studentUsername : (isAdmin ? "ADMIN" : null);
+  // Sanitized to match Firebase-safe keys (no dots/slashes/etc), since this is used as a path segment
+  function sanitizeVoterId(str){
+    return String(str).trim().replace(/[.#$\[\]\/]/g, "_");
+  }
+  const voterId = isStudent ? sanitizeVoterId(studentUsername) : (isAdmin ? "ADMIN" : null);
 
   const approvedPolls = pollsData.filter(p=>p.status==="approved").sort((a,b)=>b.ts-a.ts);
   const pendingPolls  = pollsData.filter(p=>p.status==="pending").sort((a,b)=>a.ts-b.ts);
