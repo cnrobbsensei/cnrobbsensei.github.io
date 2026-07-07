@@ -1,1 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Code Ninjas – Ring Toss</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#060609;color:#fff;}
+#root{min-height:100vh;display:flex;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+input::placeholder,textarea::placeholder{color:rgba(255,255,255,0.2);}
+input[type=number]{-moz-appearance:textfield;}
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}
+select option{background:#0a0a0f;color:#fff;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@media(max-width:768px){#root{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const firebaseConfig = {
+  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
+  authDomain:"githubpat-2d39d.firebaseapp.com",
+  projectId:"githubpat-2d39d",
+  storageBucket:"githubpat-2d39d.firebasestorage.app",
+  messagingSenderId:"375553339098",
+  appId:"1:375553339098:web:729bb04215f50217937fe3",
+  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
 
+window.fbLeaderboard = {
+  async getAll(){
+    const snap = await db.ref("leaderboards").once("value");
+    const val = snap.val() || {};
+    const all = [];
+    for(const weekKey of Object.keys(val)){
+      const week = parseInt(weekKey.replace("week_",""));
+      const entries = val[weekKey].entries || {};
+      for(const [id,entry] of Object.entries(entries)){
+        all.push({id,week,...entry});
+      }
+    }
+    return all;
+  },
+  async addEntry(week,name,points,date){
+    const ref = db.ref(`leaderboards/week_${week}/entries`).push();
+    await ref.set({week,name,points,date});
+    return {id:ref.key};
+  },
+  async deleteEntry(week,entryId){
+    await db.ref(`leaderboards/week_${week}/entries/${entryId}`).remove();
+  }
+};
+</script>
+<script type="text/babel">
+const {useState,useEffect} = React;
+const MAX_ATTEMPTS_PER_DAY = 3;
+
+const WEEK_START = new Date("2026-05-14T00:00:00");
+function getCurrentWeek(){
+  const diff = new Date() - WEEK_START;
+  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
+}
+function getWeekLabel(n){
+  const s = new Date(WEEK_START.getTime()+(n-1)*7*24*60*60*1000);
+  const e = new Date(s.getTime()+6*24*60*60*1000);
+  const fmt = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
+  return `Week ${n} (${fmt(s)} – ${fmt(e)})`;
+}
+function todayStr(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function isInputWindowOpen(){ return true; }
+
+function groupEntries(entries){
+  const map = {};
+  for(const e of entries){
+    const key = `${e.week}|${e.name}|${e.date}`;
+    if(!map[key]) map[key]={week:e.week,name:e.name,date:e.date,points:0,ids:[],attempts:0};
+    map[key].points += e.points;
+    map[key].attempts += 1;
+    map[key].ids.push(e.id);
+  }
+  return Object.values(map);
+}
+function getAttemptsToday(allEntries, name, week, date){
+  return allEntries.filter(e =>
+    e.week === week &&
+    e.name.toLowerCase() === name.trim().toLowerCase() &&
+    e.date === date
+  ).length;
+}
+function calcBoard(groupedForWeek){
+  return groupedForWeek
+    .map(e => ({name:e.name,date:e.date,points:e.points,attempts:e.attempts,ids:e.ids}))
+    .sort((a,b) => b.points - a.points);
+}
+function calcNinjaSummary(groupedForWeek){
+  const map = {};
+  for(const e of groupedForWeek){
+    if(!map[e.name]) map[e.name]={name:e.name,total:0,days:[]};
+    map[e.name].total += e.points;
+    map[e.name].days.push({date:e.date,points:e.points,attempts:e.attempts,ids:e.ids});
+  }
+  return Object.values(map).sort((a,b)=>b.total-a.total);
+}
+
+function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
+  return(
+    <div onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
+      background:"rgba(255,255,255,0.06)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
+      border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",...style
+    }}>{children}</div>
+  );
+}
+function Toast({msg,color="#39ff14",onDone}){
+  useEffect(()=>{const t=setTimeout(onDone,3500);return()=>clearTimeout(t);},[]);
+  return(
+    <div style={{position:"fixed",bottom:24,right:16,left:16,zIndex:9999,maxWidth:380,margin:"0 auto",
+      background:"rgba(10,10,20,0.96)",border:`1px solid ${color}`,borderRadius:12,
+      padding:"14px 20px",color,fontFamily:"'Fira Code',monospace",fontWeight:600,fontSize:13,
+      boxShadow:`0 0 24px ${color}55`,animation:"slideIn .3s ease"}}>{msg}</div>
+  );
+}
+function Spinner(){
+  return <div style={{width:16,height:16,border:"2px solid rgba(255,255,255,0.2)",borderTop:"2px solid #39ff14",borderRadius:"50%",animation:"spin .8s linear infinite",display:"inline-block"}}/>;
+}
+function iStyle(err){
+  return{width:"100%",background:"rgba(255,255,255,0.06)",border:`1px solid ${err?"#ff2d78":"rgba(255,255,255,0.15)"}`,
+    borderRadius:10,padding:"11px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",transition:"border-color .2s"};
+}
+function LoadingScreen({status}){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:36,height:36,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
+    </div>
+  );
+}
+function useIsMobile(){
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return mobile;
+}
+const NAV=[{id:"home",icon:"🏠",label:"Home",href:"home.html"},{id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},{id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},{id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},{id:"polls",icon:"📊",label:"Polls",href:"polls.html"}];
+function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+
+function MobileNav({active,isAdmin,isStudent,studentUsername}){
+  const [open,setOpen]=useState(false);
+  return(
+    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{padding:"3px 8px",borderRadius:99,
+            background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+            border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,
+            color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
+          </div>
+          <button onClick={()=>setOpen(!open)} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",padding:"6px 10px",cursor:"pointer",fontSize:16}}>{open?"✕":"☰"}</button>
+        </div>
+      </div>
+      {open&&(
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+          {NAV.map(item=>(
+            <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+              display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
+              background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
+              color:active===item.id?"#fff":"rgba(255,255,255,0.6)"}}>
+              <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+            </button>
+          ))}
+          <button onClick={doLogout} style={{padding:"9px 14px",borderRadius:10,border:"1px solid rgba(255,45,120,0.3)",background:"rgba(255,45,120,0.08)",color:"#ff2d78",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1}}>← LOG OUT</button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Sidebar({active,isAdmin,isStudent,studentUsername}){
+  return(
+    <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",padding:"22px 14px",gap:6,
+      background:"rgba(0,0,0,0.35)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
+      borderRight:"1px solid rgba(255,255,255,0.06)",zIndex:10,position:"sticky",top:0}}>
+      <div style={{padding:"10px 10px 20px",textAlign:"center"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
+        <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+          background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+          border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
+          <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",letterSpacing:1,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"ADMIN":isStudent?studentUsername:"GUEST"}
+          </span>
+        </div>
+      </div>
+      {NAV.map(item=>(
+        <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+          display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
+          fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
+          background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
+          color:active===item.id?"#fff":"rgba(255,255,255,0.4)",
+          boxShadow:active===item.id?"inset 0 0 0 1px rgba(57,255,20,0.3),0 0 16px rgba(57,255,20,0.1)":"none"}}
+          onMouseEnter={e=>{if(active!==item.id){e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="#fff";}}}
+          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
+          <span style={{fontSize:17}}>{item.icon}</span>{item.label}
+        </button>
+      ))}
+      <div style={{marginTop:"auto",padding:"0 0 4px"}}>
+        <Glass style={{padding:"11px 14px",marginBottom:8}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+        </Glass>
+        <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
+          background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
+          fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1,transition:"all .2s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,45,120,0.1)";e.currentTarget.style.borderColor="#ff2d7844";e.currentTarget.style.color="#ff2d78";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.03)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";e.currentTarget.style.color="rgba(255,255,255,0.35)";}}>
+          ← LOG OUT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const SESSION_DAYS = [
+  {label:"Tuesday",dow:2},{label:"Wednesday",dow:3},{label:"Thursday",dow:4},{label:"Saturday",dow:6},{label:"Sunday",dow:0},
+];
+function dowFromDateStr(dateStr){
+  const [y,m,d] = dateStr.split("-").map(Number);
+  return new Date(y, m-1, d).getDay();
+}
+
+function LeaderboardView({allEntries}){
+  const totalWeeks=getCurrentWeek()+1;
+  const [week,setWeek]=useState(getCurrentWeek());
+  const weekEntries=allEntries.filter(e=>e.week===week);
+  const grouped=groupEntries(weekEntries);
+  const board=calcBoard(grouped);
+
+  const dayBuckets = SESSION_DAYS.map(sd => ({...sd,rows: board.filter(row => dowFromDateStr(row.date) === sd.dow)})).filter(b => b.rows.length > 0);
+  const otherRows = board.filter(row => !SESSION_DAYS.find(s => s.dow === dowFromDateStr(row.date)));
+
+  function DaySection({label, color, rows}){
+    return(
+      <div style={{marginBottom:28}}>
+        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+          <div style={{height:1,flex:1,background:`linear-gradient(90deg,${color}55,transparent)`}}/>
+          <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,fontWeight:700,color:color,letterSpacing:2,textShadow:`0 0 12px ${color}88`}}>{label.toUpperCase()}</span>
+          <div style={{height:1,flex:1,background:`linear-gradient(270deg,${color}55,transparent)`}}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"44px 1fr 110px",gap:10,padding:"4px 16px",fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",letterSpacing:1.5,marginBottom:6}}>
+          <span>RANK</span><span>NINJA</span><span style={{textAlign:"right"}}>SCORE</span>
+        </div>
+        {rows.map((row,i)=>{
+          const rank=i+1;
+          const gc=rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":"transparent";
+          return(
+            <Glass key={`${row.name}-${row.date}-${i}`} style={{padding:"11px 16px",marginBottom:7,
+              borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.07)",
+              boxShadow:rank<=3?`0 0 16px ${gc}22,0 4px 20px rgba(0,0,0,0.4)`:"0 4px 14px rgba(0,0,0,0.3)",
+              animation:`fadeUp .35s ease both ${i*.04}s`}}>
+              <div style={{display:"grid",gridTemplateColumns:"44px 1fr 110px",gap:10,alignItems:"center"}}>
+                <div style={{width:32,height:32,borderRadius:"50%",flexShrink:0,background:rank<=3?`linear-gradient(135deg,${gc},${gc}99)`:"rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:rank<=3?13:11,color:rank<=3?"#000":"#999"}}>
+                  {rank===1?"👑":rank===2?"🥈":rank===3?"🥉":`#${rank}`}
+                </div>
+                <div>
+                  <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:"clamp(12px,1.5vw,14px)",color:"#fff"}}>{row.name}</div>
+                  {row.attempts>1&&(
+                    <div style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.25)",marginTop:2}}>{row.attempts}/{MAX_ATTEMPTS_PER_DAY} attempts</div>
+                  )}
+                </div>
+                <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:"clamp(13px,1.8vw,17px)",color:rank<=3?gc:"#39ff14",textShadow:rank<=3?`0 0 10px ${gc}88`:"0 0 8px #39ff1455"}}>
+                  {row.points.toLocaleString()}
+                </div>
+              </div>
+            </Glass>
+          );
+        })}
+      </div>
+    );
+  }
+  const DAY_COLORS=["#00cfff","#39ff14","#ff2d78","#ffd700","#bf5fff"];
+  return(
+    <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28,flexWrap:"wrap"}}>
+        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,20px)",color:"#fff",margin:0}}>🏆 Ring Toss Leaderboard</h2>
+        <select value={week} onChange={e=>setWeek(Number(e.target.value))}
+          style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,color:"#fff",padding:"7px 12px",fontFamily:"'Fira Code',monospace",fontSize:11,cursor:"pointer"}}>
+          {Array.from({length:totalWeeks},(_,i)=>i+1).map(w=>(
+            <option key={w} value={w} style={{background:"#0a0a0f"}}>{getWeekLabel(w)}{w===getCurrentWeek()?" ← Current":""}</option>
+          ))}
+        </select>
+      </div>
+      {board.length===0?(
+        <Glass style={{padding:40,textAlign:"center"}}>
+          <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>No scores yet for this week. Be the first! 🥷</p>
+        </Glass>
+      ):(
+        <>
+          {dayBuckets.map((bucket,bi)=>(<DaySection key={bucket.label} label={bucket.label} color={DAY_COLORS[bi%DAY_COLORS.length]} rows={bucket.rows}/>))}
+          {otherRows.length>0&&<DaySection label="Other" color="#aaa" rows={otherRows}/>}
+        </>
+      )}
+    </div>
+  );
+}
+
+function EnterScores({allEntries,setAllEntries,setToast}){
+  const [name,setName]=useState("");
+  const [pts,setPts]=useState("");
+  const [errors,setErrors]=useState({});
+  const [saving,setSaving]=useState(false);
+  const [deleting,setDeleting]=useState(null);
+  const inputOpen=isInputWindowOpen();
+  const cw=getCurrentWeek();
+  const today=todayStr();
+
+  const weekEntries=allEntries.filter(e=>e.week===cw);
+  const grouped=groupEntries(weekEntries);
+  const board=calcNinjaSummary(grouped);
+  const ninjaGrouped=name.trim()?grouped.filter(e=>e.name.toLowerCase()===name.trim().toLowerCase()):[];
+  const ninjaSummary=board.find(n=>n.name.toLowerCase()===name.trim().toLowerCase());
+  const ninjaRank=board.findIndex(n=>n.name.toLowerCase()===name.trim().toLowerCase())+1;
+
+  const attemptsToday=name.trim()?getAttemptsToday(allEntries,name.trim(),cw,today):0;
+  const attemptsLeft=Math.max(0,MAX_ATTEMPTS_PER_DAY-attemptsToday);
+  const maxedOut=attemptsToday>=MAX_ATTEMPTS_PER_DAY;
+  const barColor=attemptsLeft===0?"#ff2d78":attemptsLeft===1?"#ffd700":"#39ff14";
+
+  async function submit(){
+    if(!inputOpen||maxedOut) return;
+    const errs={};
+    if(!name.trim()) errs.name="Name is required";
+    const p=Number(pts);
+    if(!pts||isNaN(p)) errs.pts="Must be a number";
+    else if(p<0) errs.pts="No negative points!";
+    if(Object.keys(errs).length){setErrors(errs);return;}
+    setErrors({});setSaving(true);
+    try{
+      const result=await window.fbLeaderboard.addEntry(cw,name.trim(),p,today);
+      const newEntry={id:result.id,week:cw,name:name.trim(),points:p,date:today};
+      setAllEntries(prev=>[...prev,newEntry]);
+      setPts("");
+      const rem=MAX_ATTEMPTS_PER_DAY-(attemptsToday+1);
+      setToast({msg:rem>0?`${name.trim()} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅`:`${name.trim()} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
+    } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
+    setSaving(false);
+  }
+
+  async function deleteEntry(entry){
+    setDeleting(entry.date+entry.name);
+    try{
+      const rawMatches=allEntries.filter(e=>e.week===cw&&e.name.toLowerCase()===entry.name.toLowerCase()&&e.date===entry.date);
+      await Promise.all(rawMatches.map(e=>window.fbLeaderboard.deleteEntry(cw,e.id)));
+      setAllEntries(prev=>prev.filter(e=>!(e.week===cw&&e.name.toLowerCase()===entry.name.toLowerCase()&&e.date===entry.date)));
+      setToast({msg:`Deleted all of ${entry.name}'s entries for ${entry.date}.`,color:"#ff2d78"});
+    } catch(e){setToast({msg:`Delete failed: ${e.message}`,color:"#ff2d78"});}
+    setDeleting(null);
+  }
+
+  return(
+    <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
+      <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(14px,2vw,20px)",color:"#fff",marginBottom:6}}>📝 Enter Scores</h2>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:24}}>{getWeekLabel(cw)}</p>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:24}}>
+        <Glass style={{padding:22}}>
+          <div style={{marginBottom:14}}>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>NINJA NAME</label>
+            <input value={name} onChange={e=>{setName(e.target.value);setErrors({});}} placeholder="e.g. ShadowByte" style={iStyle(errors.name)}
+              onFocus={e=>e.target.style.borderColor="#00cfff"}
+              onBlur={e=>e.target.style.borderColor=errors.name?"#ff2d78":"rgba(255,255,255,0.15)"}/>
+            {errors.name&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.name}</p>}
+          </div>
+
+          {name.trim()&&(
+            <div style={{marginBottom:16,borderRadius:10,padding:"11px 14px",
+              background:maxedOut?"rgba(255,45,120,0.1)":"rgba(57,255,20,0.06)",
+              border:`1px solid ${barColor}33`,transition:"all .3s"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.4)",letterSpacing:1}}>TODAY'S ATTEMPTS</span>
+                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,fontWeight:700,color:barColor}}>{attemptsToday} / {MAX_ATTEMPTS_PER_DAY}</span>
+              </div>
+              <div style={{display:"flex",gap:6,marginBottom:maxedOut||attemptsToday>0?8:0}}>
+                {Array.from({length:MAX_ATTEMPTS_PER_DAY},(_,i)=>(
+                  <div key={i} style={{flex:1,height:7,borderRadius:99,background:i<attemptsToday?barColor:"rgba(255,255,255,0.1)",boxShadow:i<attemptsToday?`0 0 8px ${barColor}88`:"none",transition:"background .3s"}}/>
+                ))}
+              </div>
+              {maxedOut&&<p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#ff2d78",textAlign:"center",margin:0}}>🚫 Max attempts reached — come back tomorrow!</p>}
+              {!maxedOut&&attemptsToday>0&&<p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",margin:0}}>{attemptsLeft} attempt{attemptsLeft!==1?"s":""} remaining today</p>}
+            </div>
+          )}
+
+          <div style={{marginBottom:14}}>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>POINTS THIS ATTEMPT</label>
+            <input value={pts} onChange={e=>setPts(e.target.value)} placeholder="e.g. 850" type="number" min="0"
+              disabled={maxedOut}
+              style={{...iStyle(errors.pts),fontFamily:"'Fira Code',monospace",fontSize:16,opacity:maxedOut?.4:1,cursor:maxedOut?"not-allowed":"text"}}
+              onFocus={e=>{if(!maxedOut)e.target.style.borderColor="#39ff14";}}
+              onBlur={e=>e.target.style.borderColor=errors.pts?"#ff2d78":"rgba(255,255,255,0.15)"}
+              onKeyDown={e=>e.key==="Enter"&&!saving&&!maxedOut&&submit()}/>
+            {errors.pts&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.pts}</p>}
+          </div>
+
+          <div style={{marginBottom:14,background:"rgba(57,255,20,0.06)",borderRadius:8,padding:"8px 12px",border:"1px solid #39ff1422"}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)"}}>TODAY: </span>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14"}}>{today}</span>
+          </div>
+
+          <button onClick={submit} disabled={saving||!inputOpen||maxedOut} style={{width:"100%",padding:12,borderRadius:10,border:"none",
+            cursor:saving||!inputOpen||maxedOut?"not-allowed":"pointer",
+            background:saving||maxedOut?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+            color:saving||maxedOut?"rgba(255,255,255,0.3)":"#000",
+            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,
+            display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+            {saving?<><Spinner/> SAVING...</>:maxedOut?"🚫 MAX ATTEMPTS REACHED":"SUBMIT SCORE ⚡"}
+          </button>
+        </Glass>
+
+        <Glass style={{padding:22,borderColor:ninjaSummary?"#39ff1433":"rgba(255,255,255,0.08)"}}>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#39ff14",marginBottom:16,letterSpacing:1}}>LIVE PREVIEW</h3>
+          {ninjaSummary?(
+            <>
+              <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:16,color:"#fff",marginBottom:2}}>{ninjaSummary.name}</div>
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:14}}>Rank #{ninjaRank} this week · {ninjaSummary.total} pts total</div>
+              <div style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
+                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>DAILY TOTALS — ✕ deletes all attempts for that day</div>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {ninjaGrouped.sort((a,b)=>a.date.localeCompare(b.date)).map((e,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(57,255,20,0.08)",border:"1px solid #39ff1433",borderRadius:6,padding:"6px 10px"}}>
+                      <div>
+                        <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"#39ff14"}}>{e.date.slice(5)} → {e.points} pts</span>
+                        <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.35)",marginLeft:8}}>({e.attempts}/{MAX_ATTEMPTS_PER_DAY} attempt{e.attempts!==1?"s":""})</span>
+                      </div>
+                      <button onClick={()=>deleteEntry(e)} disabled={!!deleting}
+                        style={{background:"rgba(255,45,120,0.15)",border:"1px solid #ff2d7844",borderRadius:5,color:"#ff2d78",padding:"2px 7px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>
+                        {deleting===e.date+e.name?<Spinner/>:"✕"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div style={{background:"rgba(57,255,20,0.08)",border:"1px solid #39ff1433",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:3}}>WEEKLY TOTAL</div>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:18,color:"#39ff14"}}>{ninjaSummary.total}</div>
+                </div>
+                <div style={{background:"rgba(0,207,255,0.08)",border:"1px solid #00cfff33",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:3}}>DAYS PLAYED</div>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:18,color:"#00cfff"}}>{ninjaSummary.days.length}</div>
+                </div>
+              </div>
+            </>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:180,gap:10}}>
+              <div style={{fontSize:32}}>🥷</div>
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.3)",textAlign:"center"}}>Enter a ninja name to see their stats</p>
+            </div>
+          )}
+        </Glass>
+      </div>
+    </div>
+  );
+}
+
+function LeaderboardsTab({allEntries,setAllEntries,setToast,isAdmin}){
+  const [sub,setSub]=useState("view");
+  const tabs=[{id:"view",label:"🏆 Leaderboard"}];
+  if(isAdmin) tabs.push({id:"enter",label:"📝 Enter Scores"});
+  return(
+    <div style={{minHeight:"100%"}}>
+      <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px) 0",display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+        {tabs.map(t=>(
+          <button key={t.id} onClick={()=>setSub(t.id)} style={{padding:"9px 18px",borderRadius:99,border:"none",cursor:"pointer",
+            fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",
+            background:sub===t.id?"linear-gradient(135deg,#39ff14,#00cfff)":"rgba(255,255,255,0.07)",
+            color:sub===t.id?"#000":"rgba(255,255,255,0.6)",
+            boxShadow:sub===t.id?"0 0 20px #39ff1444":"none"}}>{t.label}</button>
+        ))}
+        {!isAdmin&&(
+          <div style={{padding:"7px 14px",borderRadius:99,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)"}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)"}}>👀 Guest — view only</span>
+          </div>
+        )}
+      </div>
+      {sub==="view"&&<LeaderboardView allEntries={allEntries}/>}
+      {sub==="enter"&&isAdmin&&<EnterScores allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast}/>}
+    </div>
+  );
+}
+
+function EntryGamesApp(){
+  const [auth,setAuth]=useState(null);
+  const [allEntries,setAllEntries]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [toast,setToast]=useState(null);
+  const isMobile=useIsMobile();
+
+  useEffect(()=>{
+    const role = localStorage.getItem("cn_role");
+    if(!role){ window.location.href="index.html"; return; }
+    setAuth({role,username:localStorage.getItem("cn_username")});
+    (async()=>{
+      try{ setAllEntries(await window.fbLeaderboard.getAll()); }catch(e){console.warn(e);}
+      setLoading(false);
+    })();
+  },[]);
+
+  if(!auth||loading) return <LoadingScreen status="Loading leaderboard..."/>;
+  const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
+
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",minHeight:"100vh",position:"relative",zIndex:1,width:"100%"}}>
+        {isMobile
+          ?<MobileNav active="leaderboards" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+          :<Sidebar active="leaderboards" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+        }
+        <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
+          <LeaderboardsTab allEntries={allEntries} setAllEntries={setAllEntries} setToast={setToast} isAdmin={isAdmin}/>
+        </div>
+      </div>
+      {toast&&<Toast msg={toast.msg} color={toast.color||"#39ff14"} onDone={()=>setToast(null)}/>}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<EntryGamesApp/>);
+</script>
+</body>
+</html>
