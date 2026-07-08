@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Code Ninjas – Games</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#060609;color:#fff;}
+#root{min-height:100vh;display:flex;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+input::placeholder{color:rgba(255,255,255,0.2);}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes popIn{from{opacity:0;transform:scale(.92)}to{opacity:1;transform:scale(1)}}
+@keyframes cardPop{0%{transform:scale(1)}50%{transform:scale(1.08)}100%{transform:scale(1)}}
+@keyframes heartLose{0%{transform:scale(1.3)}100%{transform:scale(1)}}
+@keyframes shakeCard{0%,100%{transform:translateX(0)}20%{transform:translateX(-4px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+@media(max-width:768px){#root{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const firebaseConfig = {
+  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
+  authDomain:"githubpat-2d39d.firebaseapp.com",
+  projectId:"githubpat-2d39d",
+  storageBucket:"githubpat-2d39d.firebasestorage.app",
+  messagingSenderId:"375553339098",
+  appId:"1:375553339098:web:729bb04215f50217937fe3",
+  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+window.fbGames = {
+  async getSettings(){
+    const snap = await db.ref("games/settings").once("value");
+    return snap.val() || {breakMode:false};
+  },
+  async setBreakMode(v){
+    await db.ref("games/settings").update({breakMode:v});
+  },
+  async getLeaderboard(gameId){
+    const snap = await db.ref(`games/${gameId}/leaderboard`).once("value");
+    const val = snap.val() || {};
+    return Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score).slice(0,5);
+  },
+  async submitScore(gameId,name,score){
+    const ref = db.ref(`games/${gameId}/leaderboard`).push();
+    const ts = Date.now();
+    await ref.set({name,score,ts});
+    const snap = await db.ref(`games/${gameId}/leaderboard`).once("value");
+    const val = snap.val() || {};
+    const entries = Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score);
+    if(entries.length>5){
+      const toDelete = entries.slice(5);
+      await Promise.all(toDelete.map(e=>db.ref(`games/${gameId}/leaderboard/${e.id}`).remove()));
+    }
+    const top5 = entries.slice(0,5);
+    const madeIt = top5.some(e=>e.ts===ts && e.name===name && e.score===score);
+    return {top5,madeIt};
+  }
+};
+</script>
+<script type="text/babel">
+const {useState,useEffect,useRef} = React;
+
+const WEEK_START = new Date("2026-05-14T00:00:00");
+function getCurrentWeek(){
+  const diff = new Date() - WEEK_START;
+  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
+}
+
+function Glass({children,style={},onClick}){
+  return(
+    <div onClick={onClick} style={{
+      background:"rgba(255,255,255,0.06)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
+      border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",...style
+    }}>{children}</div>
+  );
+}
+function Spinner(){
+  return <div style={{width:16,height:16,border:"2px solid rgba(255,255,255,0.2)",borderTop:"2px solid #39ff14",borderRadius:"50%",animation:"spin .8s linear infinite",display:"inline-block"}}/>;
+}
+function iStyle(err){
+  return{width:"100%",background:"rgba(255,255,255,0.06)",border:`1px solid ${err?"#ff2d78":"rgba(255,255,255,0.15)"}`,
+    borderRadius:10,padding:"10px 13px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:13,outline:"none",boxSizing:"border-box"};
+}
+function LoadingScreen({status}){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:36,height:36,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
+    </div>
+  );
+}
+function useIsMobile(){
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return mobile;
+}
+const NAV=[
+  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
+  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
+  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
+  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
+  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
+  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
+  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
+];
+function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+
+function MobileNav({active,isAdmin,isStudent,studentUsername}){
+  const [open,setOpen]=useState(false);
+  return(
+    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{padding:"3px 8px",borderRadius:99,
+            background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+            border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,
+            color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
+          </div>
+          <button onClick={()=>setOpen(!open)} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",padding:"6px 10px",cursor:"pointer",fontSize:16}}>{open?"✕":"☰"}</button>
+        </div>
+      </div>
+      {open&&(
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+          {NAV.map(item=>(
+            <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+              display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
+              background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
+              color:active===item.id?"#fff":"rgba(255,255,255,0.6)"}}>
+              <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+            </button>
+          ))}
+          <button onClick={doLogout} style={{padding:"9px 14px",borderRadius:10,border:"1px solid rgba(255,45,120,0.3)",background:"rgba(255,45,120,0.08)",color:"#ff2d78",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1}}>← LOG OUT</button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Sidebar({active,isAdmin,isStudent,studentUsername}){
+  return(
+    <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",padding:"22px 14px",gap:6,
+      background:"rgba(0,0,0,0.35)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
+      borderRight:"1px solid rgba(255,255,255,0.06)",zIndex:10,position:"sticky",top:0}}>
+      <div style={{padding:"10px 10px 20px",textAlign:"center"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
+        <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+          background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+          border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
+          <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",letterSpacing:1,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"ADMIN":isStudent?studentUsername:"GUEST"}
+          </span>
+        </div>
+      </div>
+      {NAV.map(item=>(
+        <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+          display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
+          fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
+          background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
+          color:active===item.id?"#fff":"rgba(255,255,255,0.4)",
+          boxShadow:active===item.id?"inset 0 0 0 1px rgba(57,255,20,0.3),0 0 16px rgba(57,255,20,0.1)":"none"}}
+          onMouseEnter={e=>{if(active!==item.id){e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="#fff";}}}
+          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
+          <span style={{fontSize:17}}>{item.icon}</span>{item.label}
+        </button>
+      ))}
+      <div style={{marginTop:"auto",padding:"0 0 4px"}}>
+        <Glass style={{padding:"11px 14px",marginBottom:8}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+        </Glass>
+        <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
+          background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
+          fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1,transition:"all .2s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,45,120,0.1)";e.currentTarget.style.borderColor="#ff2d7844";e.currentTarget.style.color="#ff2d78";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.03)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";e.currentTarget.style.color="rgba(255,255,255,0.35)";}}>
+          ← LOG OUT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Memory Match game ────────────────────────────────────────────────────────
+const SYMBOL_POOL = ['🥷','🐉','⚡','🔥','🌟','💎','🎯','🚀','🎮','🧩','🏆','⚔️','🛡️','🎲','🔮','👾','🍀','🎧'];
+function makeDeck(){
+  const shuffledPool = [...SYMBOL_POOL].sort(()=>Math.random()-0.5).slice(0,8);
+  const pairs = [...shuffledPool,...shuffledPool];
+  const deck = pairs
+    .map(sym=>({sym,r:Math.random()}))
+    .sort((a,b)=>a.r-b.r)
+    .map((c,i)=>({id:i,sym:c.sym,matched:false}));
+  return deck;
+}
+
+function MemoryMatchGame({defaultName,onExit}){
+  const [hearts,setHearts]=useState(3);
+  const [score,setScore]=useState(0);
+  const [round,setRound]=useState(1);
+  const [deck,setDeck]=useState(()=>makeDeck());
+  const [flipped,setFlipped]=useState([]);
+  const [locked,setLocked]=useState(false);
+  const [gameOver,setGameOver]=useState(false);
+  const [shakeIdx,setShakeIdx]=useState([]);
+  const [name,setName]=useState(defaultName||"");
+  const [submitting,setSubmitting]=useState(false);
+  const [submitted,setSubmitted]=useState(false);
+  const [madeIt,setMadeIt]=useState(false);
+  const [leaderboard,setLeaderboard]=useState(null);
+  const timers=useRef([]);
+
+  useEffect(()=>()=>{ timers.current.forEach(clearTimeout); },[]);
+
+  useEffect(()=>{
+    if(deck.length && deck.every(c=>c.matched)){
+      const t=setTimeout(()=>{
+        setScore(s=>s+200);
+        setRound(r=>r+1);
+        setDeck(makeDeck());
+      },550);
+      timers.current.push(t);
+    }
+  },[deck]);
+
+  useEffect(()=>{
+    if(gameOver){
+      window.fbGames.getLeaderboard("memoryMatch").then(setLeaderboard).catch(()=>setLeaderboard([]));
+    }
+  },[gameOver]);
+
+  function handleCardClick(idx){
+    if(locked||gameOver) return;
+    if(flipped.includes(idx)) return;
+    if(deck[idx].matched) return;
+    if(flipped.length>=2) return;
+    const next=[...flipped,idx];
+    setFlipped(next);
+    if(next.length===2){
+      setLocked(true);
+      const [a,b]=next;
+      if(deck[a].sym===deck[b].sym){
+        const t=setTimeout(()=>{
+          setDeck(prev=>prev.map((c,i)=>(i===a||i===b)?{...c,matched:true}:c));
+          setScore(s=>s+100);
+          setFlipped([]);
+          setLocked(false);
+        },450);
+        timers.current.push(t);
+      } else {
+        setShakeIdx([a,b]);
+        const t=setTimeout(()=>{
+          setFlipped([]);
+          setLocked(false);
+          setShakeIdx([]);
+          setHearts(h=>{
+            const nh=h-1;
+            if(nh<=0) setGameOver(true);
+            return nh;
+          });
+        },700);
+        timers.current.push(t);
+      }
+    }
+  }
+
+  async function saveScore(){
+    if(!name.trim()||submitting||submitted) return;
+    setSubmitting(true);
+    try{
+      const {top5,madeIt:mi} = await window.fbGames.submitScore("memoryMatch",name.trim(),score);
+      setLeaderboard(top5);
+      setMadeIt(mi);
+      setSubmitted(true);
+    } catch(e){ console.warn(e); }
+    setSubmitting(false);
+  }
+
+  function playAgain(){
+    setHearts(3);setScore(0);setRound(1);setDeck(makeDeck());
+    setFlipped([]);setLocked(false);setGameOver(false);
+    setSubmitted(false);setMadeIt(false);setLeaderboard(null);
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {!gameOver?(
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
+            <div style={{display:"flex",gap:6}}>
+              {[0,1,2].map(i=>(
+                <span key={i} style={{fontSize:22,animation:hearts===i+1?"heartLose .3s ease":"none"}}>
+                  {i<hearts?"❤️":"🖤"}
+                </span>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:14,fontFamily:"'Fira Code',monospace",fontSize:12}}>
+              <span style={{color:"rgba(255,255,255,0.4)"}}>ROUND <b style={{color:"#00cfff"}}>{round}</b></span>
+              <span style={{color:"rgba(255,255,255,0.4)"}}>SCORE <b style={{color:"#39ff14"}}>{score}</b></span>
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,flex:1,alignContent:"center"}}>
+            {deck.map((card,idx)=>{
+              const isUp = flipped.includes(idx)||card.matched;
+              const isShaking = shakeIdx.includes(idx);
+              return(
+                <div key={card.id} onClick={()=>handleCardClick(idx)}
+                  style={{
+                    aspectRatio:"1",borderRadius:10,cursor:card.matched?"default":"pointer",
+                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:"clamp(20px,5vw,28px)",
+                    userSelect:"none",transition:"transform .15s, background .2s, border-color .2s",
+                    animation:isShaking?"shakeCard .4s ease":card.matched?"cardPop .3s ease":"none",
+                    background:isUp?(card.matched?"rgba(57,255,20,0.15)":"rgba(0,207,255,0.15)"):"rgba(255,255,255,0.06)",
+                    border:`1px solid ${isUp?(card.matched?"#39ff1455":"#00cfff55"):"rgba(255,255,255,0.15)"}`,
+                    opacity:card.matched?0.55:1,
+                    transform:isUp?"scale(1)":"scale(1)"
+                  }}>
+                  {isUp?card.sym:"❔"}
+                </div>
+              );
+            })}
+          </div>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:14}}>
+            Match all pairs to advance — it never ends until you're out of hearts!
+          </p>
+        </>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:6,overflowY:"auto"}}>
+          <div style={{fontSize:40,marginBottom:4}}>💔</div>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,color:"#ff2d78"}}>GAME OVER</h3>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:10}}>
+            Final Score: <b style={{color:"#39ff14"}}>{score}</b> · Reached Round {round}
+          </p>
+
+          {!submitted?(
+            <div style={{width:"100%",maxWidth:280,marginBottom:18}}>
+              <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:6,letterSpacing:1}}>SAVE YOUR SCORE</label>
+              <div style={{display:"flex",gap:8}}>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={iStyle(false)}/>
+                <button onClick={saveScore} disabled={!name.trim()||submitting}
+                  style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
+                    cursor:!name.trim()||submitting?"not-allowed":"pointer",
+                    background:!name.trim()||submitting?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                    color:!name.trim()||submitting?"rgba(255,255,255,0.3)":"#000",
+                    fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+                  {submitting?<Spinner/>:"SAVE"}
+                </button>
+              </div>
+            </div>
+          ):(
+            <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:madeIt?"#ffd700":"#39ff14",marginBottom:14}}>
+              {madeIt?"🏆 New Top 5 Leaderboard Entry!":"✅ Score submitted!"}
+            </p>
+          )}
+
+          <div style={{width:"100%",maxWidth:320}}>
+            <h4 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ffd700",marginBottom:10,letterSpacing:1}}>🏆 TOP 5 — MEMORY MATCH</h4>
+            {leaderboard===null?(
+              <div style={{display:"flex",justifyContent:"center",padding:20}}><Spinner/></div>
+            ):leaderboard.length===0?(
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.35)"}}>No scores yet — you could be first!</p>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {leaderboard.map((e,i)=>{
+                  const isMe = submitted && e.name===name.trim() && e.score===score;
+                  const medal = i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`;
+                  return(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"8px 12px",borderRadius:8,
+                      background:isMe?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",
+                      border:`1px solid ${isMe?"#ffd70066":"rgba(255,255,255,0.08)"}`}}>
+                      <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,fontWeight:700,color:isMe?"#ffd700":"#fff"}}>{medal} {e.name}</span>
+                      <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"flex",gap:10,marginTop:20}}>
+            <button onClick={playAgain}
+              style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              ↻ PLAY AGAIN
+            </button>
+            <button onClick={onExit}
+              style={{padding:"10px 20px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",cursor:"pointer",
+                background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              EXIT
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeaderboardOnly({onPlay}){
+  const [leaderboard,setLeaderboard]=useState(null);
+  useEffect(()=>{
+    window.fbGames.getLeaderboard("memoryMatch").then(setLeaderboard).catch(()=>setLeaderboard([]));
+  },[]);
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:14}}>
+      <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#ffd700"}}>🏆 Memory Match — Top 5</h3>
+      {leaderboard===null?(
+        <div style={{padding:30}}><Spinner/></div>
+      ):leaderboard.length===0?(
+        <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.4)"}}>No scores yet — be the first!</p>
+      ):(
+        <div style={{width:"100%",maxWidth:320,display:"flex",flexDirection:"column",gap:8}}>
+          {leaderboard.map((e,i)=>{
+            const medal = i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`;
+            return(
+              <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                padding:"10px 14px",borderRadius:9,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)"}}>
+                <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,fontWeight:700}}>{medal} {e.name}</span>
+                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <button onClick={onPlay}
+        style={{marginTop:6,padding:"11px 26px",borderRadius:99,border:"none",cursor:"pointer",
+          background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+          fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1}}>
+        ▶ PLAY NOW
+      </button>
+    </div>
+  );
+}
+
+function GameModal({gameId,initialMode,defaultName,onClose}){
+  const [mode,setMode]=useState(initialMode); // 'play' | 'leaderboard'
+  useEffect(()=>{
+    function onKey(e){ if(e.key==="Escape") onClose(); }
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[]);
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(2,2,6,0.85)",backdropFilter:"blur(6px)",
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <Glass style={{width:"100%",maxWidth:460,maxHeight:"88vh",padding:"22px",position:"relative",
+        display:"flex",flexDirection:"column",animation:"popIn .25s ease",borderColor:"#39ff1433",
+        boxShadow:"0 0 60px rgba(57,255,20,0.15),0 20px 60px rgba(0,0,0,0.6)"}}>
+        <button onClick={onClose}
+          style={{position:"absolute",top:14,right:14,background:"rgba(255,255,255,0.08)",
+            border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",
+            width:30,height:30,cursor:"pointer",fontSize:15,zIndex:2}}>✕</button>
+        <div style={{marginBottom:16}}>
+          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,color:"#fff",margin:0}}>🧠 Memory Match</h2>
+        </div>
+        <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column"}}>
+          {mode==="leaderboard"
+            ?<LeaderboardOnly onPlay={()=>setMode("play")}/>
+            :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
+          }
+        </div>
+      </Glass>
+    </div>
+  );
+}
+
+// ── Game hub ─────────────────────────────────────────────────────────────────
+const GAMES_LIST = [
+  {id:"memory",name:"Memory Match",icon:"🧠",desc:"Flip cards, find pairs, don't run out of hearts.",active:true},
+  {id:"soon1",name:"Coming Soon",icon:"🎲",desc:"A new game is being built for the dojo!",active:false},
+  {id:"soon2",name:"Coming Soon",icon:"🕹️",desc:"A new game is being built for the dojo!",active:false},
+];
+
+function GamesTab({isAdmin,studentUsername}){
+  const [settings,setSettings]=useState(null);
+  const [savingSetting,setSavingSetting]=useState(false);
+  const [modal,setModal]=useState(null); // {gameId, mode}
+
+  useEffect(()=>{
+    window.fbGames.getSettings().then(setSettings).catch(()=>setSettings({breakMode:false}));
+  },[]);
+
+  async function toggleBreak(){
+    if(!settings||savingSetting) return;
+    setSavingSetting(true);
+    const next=!settings.breakMode;
+    try{
+      await window.fbGames.setBreakMode(next);
+      setSettings({...settings,breakMode:next});
+    } catch(e){ console.warn(e); }
+    setSavingSetting(false);
+  }
+
+  const breakOn = settings&&settings.breakMode;
+  const locked = !isAdmin && !breakOn;
+
+  return(
+    <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8,flexWrap:"wrap"}}>
+        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,22px)",color:"#fff",margin:0,
+          background:"linear-gradient(135deg,#ff2d78,#ffd700)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
+          🎮 Break Time Games
+        </h2>
+        {settings&&(
+          <div style={{padding:"4px 12px",borderRadius:99,
+            background:breakOn?"rgba(57,255,20,0.12)":"rgba(255,45,120,0.1)",
+            border:`1px solid ${breakOn?"#39ff1444":"#ff2d7844"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,color:breakOn?"#39ff14":"#ff2d78"}}>
+            {breakOn?"🟢 BREAK MODE ACTIVE":"🔴 GAMES LOCKED"}
+          </div>
+        )}
+      </div>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:20}}>
+        Games unlock only during break — ask your Sensei!
+      </p>
+
+      {isAdmin&&(
+        <Glass style={{padding:"14px 18px",marginBottom:24,borderColor:"#ffd70033",background:"rgba(255,215,0,0.05)"}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+            <div>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#ffd700",marginBottom:2}}>SENSEI CONTROL</div>
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)"}}>
+                Turn this on to let students play during break.
+              </div>
+            </div>
+            <button onClick={toggleBreak} disabled={!settings||savingSetting}
+              style={{padding:"10px 22px",borderRadius:99,border:"none",cursor:!settings||savingSetting?"not-allowed":"pointer",
+                background:savingSetting?"rgba(255,255,255,0.1)":breakOn?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                color:savingSetting?"rgba(255,255,255,0.3)":"#000",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,
+                display:"flex",alignItems:"center",gap:8}}>
+              {savingSetting?<><Spinner/> SAVING...</>:breakOn?"⏹ END BREAK":"▶ START BREAK"}
+            </button>
+          </div>
+        </Glass>
+      )}
+
+      {locked?(
+        <Glass style={{padding:44,textAlign:"center",borderColor:"rgba(255,45,120,0.25)"}}>
+          <div style={{fontSize:42,marginBottom:12}}>🔒</div>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,color:"#ff2d78",marginBottom:8}}>Games are locked right now</h3>
+          <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.4)"}}>
+            Ask your Sensei to start break time to unlock the games!
+          </p>
+        </Glass>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:18}}>
+          {GAMES_LIST.map((g,i)=>(
+            <Glass key={g.id} style={{padding:20,borderColor:g.active?"rgba(57,255,20,0.2)":"rgba(255,255,255,0.06)",
+              opacity:g.active?1:0.55,animation:`fadeUp .35s ease both ${i*.06}s`}}>
+              <div style={{fontSize:34,marginBottom:10}}>{g.icon}</div>
+              <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:15,color:"#fff",marginBottom:6}}>{g.name}</div>
+              <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:16,lineHeight:1.5,minHeight:30}}>
+                {g.desc}
+              </p>
+              {g.active?(
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>setModal({gameId:g.id,mode:"play"})}
+                    style={{flex:1,padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
+                      background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>▶ PLAY</button>
+                  <button onClick={()=>setModal({gameId:g.id,mode:"leaderboard"})}
+                    style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid #ffd70044",cursor:"pointer",
+                      background:"rgba(255,215,0,0.1)",color:"#ffd700",
+                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>🏆</button>
+                </div>
+              ):(
+                <div style={{padding:"9px",borderRadius:9,textAlign:"center",background:"rgba(255,255,255,0.05)",
+                  border:"1px solid rgba(255,255,255,0.1)",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)"}}>
+                  🔒 Coming Soon
+                </div>
+              )}
+            </Glass>
+          ))}
+        </div>
+      )}
+
+      {modal&&(
+        <GameModal gameId={modal.gameId} initialMode={modal.mode} defaultName={studentUsername||""} onClose={()=>setModal(null)}/>
+      )}
+    </div>
+  );
+}
+
+function GamesApp(){
+  const [auth,setAuth]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const isMobile=useIsMobile();
+
+  useEffect(()=>{
+    const role = localStorage.getItem("cn_role");
+    if(!role){ window.location.href="index.html"; return; }
+    setAuth({role,username:localStorage.getItem("cn_username")});
+    setLoading(false);
+  },[]);
+
+  if(!auth||loading) return <LoadingScreen status="Loading arcade..."/>;
+  const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
+
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",minHeight:"100vh",position:"relative",zIndex:1,width:"100%"}}>
+        {isMobile
+          ?<MobileNav active="games" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+          :<Sidebar active="games" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+        }
+        <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
+          <GamesTab isAdmin={isAdmin} studentUsername={auth.username}/>
+        </div>
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<GamesApp/>);
+</script>
+</body>
+</html>
