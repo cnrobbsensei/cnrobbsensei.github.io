@@ -55,9 +55,58 @@ window.fbLeaderboard = {
     return all;
   }
 };
+
+// Cross-referencing helper: turns a username like "adam.dodo" into a Firebase-safe key
+// (Realtime Database keys can't contain '.', '#', '$', '[', ']')
+window.cnKeySafe = function(str){
+  return String(str).trim().toLowerCase().replace(/[.#$\[\]]/g,"_");
+};
+
+window.fbUsernames = {
+  // Returns the full list of registered usernames (e.g. "adam.dodo") so we can
+  // cross-reference them against the first names logged in Ring Toss.
+  async getAll(){
+    const snap = await db.ref("usernames").once("value");
+    const val = snap.val() || {};
+    const list = [];
+    for(const [key,storedVal] of Object.entries(val)){
+      if(typeof storedVal === "string") list.push(storedVal);
+      else if(typeof key === "string" && key.includes(".")) list.push(key);
+    }
+    return [...new Set(list)];
+  }
+};
+
+window.fbBreak = {
+  // Per-student "on break" flags, keyed by a sanitized version of their username.
+  async getAll(){
+    const snap = await db.ref("games/onBreak").once("value");
+    return snap.val() || {};
+  },
+  async setBreak(usernameKey, on){
+    if(on){ await db.ref(`games/onBreak/${usernameKey}`).set(true); }
+    else{ await db.ref(`games/onBreak/${usernameKey}`).remove(); }
+  }
+};
 </script>
 <script type="text/babel">
 const {useState,useEffect} = React;
+
+const ADMIN_PASS = "Senseis"; // same Sensei password used on the sign-in screen
+
+// Matches a Ring Toss first name (e.g. "Adam") to a registered username
+// (e.g. "adam.dodo") by comparing first names only.
+function findLinkedAccount(firstName, usernames){
+  const target = String(firstName).trim().toLowerCase();
+  if(!target) return null;
+  let match = usernames.find(u=>{
+    const seg = u.split(".")[0];
+    return seg && seg.toLowerCase()===target;
+  });
+  if(match) return match;
+  match = usernames.find(u=>u.toLowerCase()===target);
+  return match || null;
+}
 
 const WEEK_START = new Date("2026-05-14T00:00:00");
 function getCurrentWeek(){
@@ -188,9 +237,10 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
   );
 }
 
-function NITDTab({allEntries,onRefresh,refreshing}){
+function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshing,onBreakChanged}){
   const today = todayStr();
   const todayEntries = allEntries.filter(e=>e.date===today);
+  const [togglingAccount,setTogglingAccount]=useState(null);
 
   // Group by ninja name -> total points today, attempt count, most-recent ts (we don't have ts on
   // leaderboard entries, so we just use insertion order as a proxy for "most recently active")
@@ -203,6 +253,19 @@ function NITDTab({allEntries,onRefresh,refreshing}){
     map[key].attempts += 1;
   });
   const present = Object.values(map).sort((a,b)=>b.firstSeenIdx-a.firstSeenIdx);
+
+  async function handleBreakToggle(account, currentlyOn){
+    if(!account || togglingAccount) return;
+    const pw = window.prompt(`Enter Sensei password to ${currentlyOn?"end":"start"} break for ${account}:`);
+    if(pw===null) return;
+    if(pw!==ADMIN_PASS){ alert("Incorrect password."); return; }
+    setTogglingAccount(account);
+    try{
+      await window.fbBreak.setBreak(window.cnKeySafe(account), !currentlyOn);
+      await onBreakChanged();
+    } catch(e){ console.warn(e); alert("Something went wrong updating break status. Please try again."); }
+    setTogglingAccount(null);
+  }
 
   return(
     <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
@@ -245,22 +308,48 @@ function NITDTab({allEntries,onRefresh,refreshing}){
         </Glass>
       ):(
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}>
-          {present.map((p,i)=>(
-            <Glass key={p.name} style={{padding:"16px 18px",borderColor:"rgba(57,255,20,0.2)",
-              animation:`fadeUp .35s ease both ${i*.04}s`}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
-                <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#39ff14,#00cfff)",
-                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>🥷</div>
-                <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:14,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  {p.name}
+          {present.map((p,i)=>{
+            const account = findLinkedAccount(p.name, usernames);
+            const onBreak = account ? !!breakStatuses[window.cnKeySafe(account)] : false;
+            return(
+              <Glass key={p.name} style={{padding:"16px 18px",borderColor:"rgba(57,255,20,0.2)",
+                animation:`fadeUp .35s ease both ${i*.04}s`}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                  <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#39ff14,#00cfff)",
+                    display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>🥷</div>
+                  <div style={{overflow:"hidden"}}>
+                    <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:14,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                      {p.name}
+                    </div>
+                    {account?(
+                      <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#00cfff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        🔗 {account}
+                      </div>
+                    ):(
+                      <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)"}}>
+                        ⚠ no linked account
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-              <div style={{display:"flex",justifyContent:"space-between",fontFamily:"'Fira Code',monospace",fontSize:10}}>
-                <span style={{color:"rgba(255,255,255,0.35)"}}>{p.attempts} attempt{p.attempts!==1?"s":""} today</span>
-                <span style={{color:"#39ff14",fontWeight:700}}>{p.points.toLocaleString()} pts</span>
-              </div>
-            </Glass>
-          ))}
+                <div style={{display:"flex",justifyContent:"space-between",fontFamily:"'Fira Code',monospace",fontSize:10,marginBottom:isAdmin?12:0}}>
+                  <span style={{color:"rgba(255,255,255,0.35)"}}>{p.attempts} attempt{p.attempts!==1?"s":""} today</span>
+                  <span style={{color:"#39ff14",fontWeight:700}}>{p.points.toLocaleString()} pts</span>
+                </div>
+                {isAdmin&&(
+                  <button onClick={()=>handleBreakToggle(account,onBreak)}
+                    disabled={!account||togglingAccount===account}
+                    style={{width:"100%",padding:"8px",borderRadius:8,border:"none",
+                      cursor:(!account||togglingAccount===account)?"not-allowed":"pointer",
+                      background:!account?"rgba(255,255,255,0.06)":onBreak?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                      color:!account?"rgba(255,255,255,0.3)":"#000",
+                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
+                    {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?"⏹ End Break":"▶ Start Break"}
+                  </button>
+                )}
+              </Glass>
+            );
+          })}
         </div>
       )}
     </div>
@@ -270,14 +359,29 @@ function NITDTab({allEntries,onRefresh,refreshing}){
 function NITDApp(){
   const [auth,setAuth]=useState(null);
   const [allEntries,setAllEntries]=useState([]);
+  const [usernames,setUsernames]=useState([]);
+  const [breakStatuses,setBreakStatuses]=useState({});
   const [loading,setLoading]=useState(true);
   const [refreshing,setRefreshing]=useState(false);
   const isMobile=useIsMobile();
 
   async function load(showSpinner){
     if(showSpinner) setRefreshing(true);
-    try{ setAllEntries(await window.fbLeaderboard.getAll()); }catch(e){console.warn(e);}
+    try{
+      const [entries,unames,breaks] = await Promise.all([
+        window.fbLeaderboard.getAll(),
+        window.fbUsernames.getAll(),
+        window.fbBreak.getAll()
+      ]);
+      setAllEntries(entries);
+      setUsernames(unames);
+      setBreakStatuses(breaks);
+    }catch(e){console.warn(e);}
     if(showSpinner) setRefreshing(false);
+  }
+
+  async function reloadBreakStatuses(){
+    try{ setBreakStatuses(await window.fbBreak.getAll()); }catch(e){console.warn(e);}
   }
 
   useEffect(()=>{
@@ -306,7 +410,8 @@ function NITDApp(){
           :<Sidebar active="nitd" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
         }
         <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
-          <NITDTab allEntries={allEntries} onRefresh={()=>load(true)} refreshing={refreshing}/>
+          <NITDTab allEntries={allEntries} usernames={usernames} breakStatuses={breakStatuses}
+            isAdmin={isAdmin} onRefresh={()=>load(true)} refreshing={refreshing} onBreakChanged={reloadBreakStatuses}/>
         </div>
       </div>
     </>
