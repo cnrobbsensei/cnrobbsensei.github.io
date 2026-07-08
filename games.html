@@ -460,14 +460,222 @@ function MemoryMatchGame({defaultName,onExit}){
   );
 }
 
-function LeaderboardOnly({onPlay}){
+// ── Dino Runner game (Chrome offline dino clone) ─────────────────────────────
+function DinoGame({defaultName,onExit}){
+  const canvasRef = useRef(null);
+  const rafRef = useRef(null);
+  const stateRef = useRef({dinoY:0,velY:0,obstacles:[],speed:220,distance:0,spawnTimer:0,running:true});
+  const [score,setScore]=useState(0);
+  const [gameOver,setGameOver]=useState(false);
+  const [name,setName]=useState(defaultName||"");
+  const [submitting,setSubmitting]=useState(false);
+  const [submitted,setSubmitted]=useState(false);
+  const [madeIt,setMadeIt]=useState(false);
+  const [leaderboard,setLeaderboard]=useState(null);
+
+  const W=360,H=180;
+  const GROUND_Y=H-30;
+  const DINO_SIZE=28;
+  const DINO_X=36;
+  const GRAVITY=1900;
+  const JUMP_V=-620;
+
+  function reset(){
+    stateRef.current={dinoY:GROUND_Y-DINO_SIZE,velY:0,obstacles:[],speed:220,distance:0,spawnTimer:0.8,running:true};
+    setScore(0);setGameOver(false);setSubmitted(false);setMadeIt(false);setLeaderboard(null);
+  }
+
+  function jump(){
+    const st=stateRef.current;
+    if(!st.running) return;
+    if(st.dinoY >= GROUND_Y-DINO_SIZE-1){
+      st.velY = JUMP_V;
+    }
+  }
+
+  useEffect(()=>{
+    reset();
+    let last = performance.now();
+    let acc = 0;
+    function draw(){
+      const canvas=canvasRef.current; if(!canvas) return;
+      const ctx=canvas.getContext("2d");
+      ctx.clearRect(0,0,W,H);
+      ctx.strokeStyle="rgba(255,255,255,0.25)";
+      ctx.beginPath();ctx.moveTo(0,GROUND_Y+1);ctx.lineTo(W,GROUND_Y+1);ctx.stroke();
+      const st=stateRef.current;
+      ctx.fillStyle="#39ff14";
+      ctx.shadowColor="#39ff14";ctx.shadowBlur=8;
+      ctx.fillRect(DINO_X,st.dinoY,DINO_SIZE,DINO_SIZE);
+      ctx.shadowBlur=0;
+      ctx.fillStyle="#ff2d78";
+      st.obstacles.forEach(o=>{ ctx.fillRect(o.x,GROUND_Y-o.h,o.w,o.h); });
+    }
+    function loop(now){
+      const dt=Math.min(0.033,(now-last)/1000);
+      last=now;
+      const st=stateRef.current;
+      if(st.running){
+        st.velY += GRAVITY*dt;
+        st.dinoY += st.velY*dt;
+        if(st.dinoY > GROUND_Y-DINO_SIZE){ st.dinoY=GROUND_Y-DINO_SIZE; st.velY=0; }
+
+        st.distance += st.speed*dt;
+        st.speed = 220 + Math.min(260, st.distance*0.02);
+
+        st.spawnTimer -= dt;
+        if(st.spawnTimer<=0){
+          const h = 22+Math.random()*20;
+          st.obstacles.push({x:W, w:14+Math.random()*10, h});
+          st.spawnTimer = Math.max(0.5, 1.1 - Math.min(0.55, st.distance*0.00006) + Math.random()*0.6);
+        }
+        st.obstacles.forEach(o=>{ o.x -= st.speed*dt; });
+        st.obstacles = st.obstacles.filter(o=>o.x+o.w>-5);
+
+        const dinoRect = {x:DINO_X+4,y:st.dinoY+4,w:DINO_SIZE-8,h:DINO_SIZE-8};
+        for(const o of st.obstacles){
+          const oRect={x:o.x,y:GROUND_Y-o.h,w:o.w,h:o.h};
+          if(dinoRect.x < oRect.x+oRect.w && dinoRect.x+dinoRect.w > oRect.x &&
+             dinoRect.y < oRect.y+oRect.h && dinoRect.y+dinoRect.h > oRect.y){
+            st.running=false;
+            setGameOver(true);
+          }
+        }
+        acc+=dt;
+        if(acc>0.1){ acc=0; setScore(Math.floor(st.distance/5)); }
+      }
+      draw();
+      rafRef.current = requestAnimationFrame(loop);
+    }
+    rafRef.current = requestAnimationFrame(loop);
+    return ()=>cancelAnimationFrame(rafRef.current);
+  },[]);
+
+  useEffect(()=>{
+    function onKey(e){ if(e.code==="Space"||e.code==="ArrowUp"){ e.preventDefault(); jump(); } }
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[]);
+
+  useEffect(()=>{
+    if(gameOver){
+      window.fbGames.getLeaderboard("dino").then(setLeaderboard).catch(()=>setLeaderboard([]));
+    }
+  },[gameOver]);
+
+  async function saveScore(){
+    if(!name.trim()||submitting||submitted) return;
+    setSubmitting(true);
+    try{
+      const {top5,madeIt:mi} = await window.fbGames.submitScore("dino",name.trim(),score);
+      setLeaderboard(top5);
+      setMadeIt(mi);
+      setSubmitted(true);
+    } catch(e){ console.warn(e); }
+    setSubmitting(false);
+  }
+
+  function playAgain(){ reset(); }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {!gameOver?(
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.4)"}}>TAP / CLICK / SPACE TO JUMP</span>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"#39ff14"}}>SCORE <b>{score}</b></span>
+          </div>
+          <div onClick={jump} onTouchStart={e=>{e.preventDefault();jump();}}
+            style={{borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.15)",
+              background:"rgba(255,255,255,0.03)",cursor:"pointer",touchAction:"none"}}>
+            <canvas ref={canvasRef} width={W} height={H} style={{display:"block",width:"100%",height:"auto"}}/>
+          </div>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:10}}>
+            Jump the cacti — it speeds up the longer you survive!
+          </p>
+        </>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:6,overflowY:"auto"}}>
+          <div style={{fontSize:40,marginBottom:4}}>🦖💥</div>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,color:"#ff2d78"}}>GAME OVER</h3>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:10}}>
+            Final Score: <b style={{color:"#39ff14"}}>{score}</b>
+          </p>
+
+          {!submitted?(
+            <div style={{width:"100%",maxWidth:280,marginBottom:18}}>
+              <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:6,letterSpacing:1}}>SAVE YOUR SCORE</label>
+              <div style={{display:"flex",gap:8}}>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={iStyle(false)}/>
+                <button onClick={saveScore} disabled={!name.trim()||submitting}
+                  style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
+                    cursor:!name.trim()||submitting?"not-allowed":"pointer",
+                    background:!name.trim()||submitting?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                    color:!name.trim()||submitting?"rgba(255,255,255,0.3)":"#000",
+                    fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+                  {submitting?<Spinner/>:"SAVE"}
+                </button>
+              </div>
+            </div>
+          ):(
+            <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:madeIt?"#ffd700":"#39ff14",marginBottom:14}}>
+              {madeIt?"🏆 New Top 5 Leaderboard Entry!":"✅ Score submitted!"}
+            </p>
+          )}
+
+          <div style={{width:"100%",maxWidth:320}}>
+            <h4 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ffd700",marginBottom:10,letterSpacing:1}}>🏆 TOP 5 — DINO RUNNER</h4>
+            {leaderboard===null?(
+              <div style={{display:"flex",justifyContent:"center",padding:20}}><Spinner/></div>
+            ):leaderboard.length===0?(
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.35)"}}>No scores yet — you could be first!</p>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {leaderboard.map((e,i)=>{
+                  const isMe = submitted && e.name===name.trim() && e.score===score;
+                  const medal = i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`;
+                  return(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"8px 12px",borderRadius:8,
+                      background:isMe?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",
+                      border:`1px solid ${isMe?"#ffd70066":"rgba(255,255,255,0.08)"}`}}>
+                      <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,fontWeight:700,color:isMe?"#ffd700":"#fff"}}>{medal} {e.name}</span>
+                      <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"flex",gap:10,marginTop:20}}>
+            <button onClick={playAgain}
+              style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              ↻ PLAY AGAIN
+            </button>
+            <button onClick={onExit}
+              style={{padding:"10px 20px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",cursor:"pointer",
+                background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              EXIT
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LeaderboardOnly({gameId,title,onPlay}){
   const [leaderboard,setLeaderboard]=useState(null);
   useEffect(()=>{
-    window.fbGames.getLeaderboard("memoryMatch").then(setLeaderboard).catch(()=>setLeaderboard([]));
-  },[]);
+    window.fbGames.getLeaderboard(gameId).then(setLeaderboard).catch(()=>setLeaderboard([]));
+  },[gameId]);
   return(
     <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:14}}>
-      <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#ffd700"}}>🏆 Memory Match — Top 5</h3>
+      <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#ffd700"}}>🏆 {title} — Top 5</h3>
       {leaderboard===null?(
         <div style={{padding:30}}><Spinner/></div>
       ):leaderboard.length===0?(
@@ -496,6 +704,12 @@ function LeaderboardOnly({onPlay}){
   );
 }
 
+// gameId (used in GAMES_LIST/hub) -> display + leaderboard metadata
+const GAME_META = {
+  memory: {title:"Memory Match", icon:"🧠", leaderboardId:"memoryMatch"},
+  dino:   {title:"Dino Runner",  icon:"🦖", leaderboardId:"dino"},
+};
+
 function GameModal({gameId,initialMode,defaultName,onClose}){
   const [mode,setMode]=useState(initialMode); // 'play' | 'leaderboard'
   useEffect(()=>{
@@ -503,6 +717,7 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
     window.addEventListener("keydown",onKey);
     return ()=>window.removeEventListener("keydown",onKey);
   },[]);
+  const meta = GAME_META[gameId] || {title:"Game",icon:"🎮",leaderboardId:gameId};
   return ReactDOM.createPortal(
     <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(2,2,6,0.85)",backdropFilter:"blur(6px)",
       display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -514,12 +729,14 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
             border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",
             width:30,height:30,cursor:"pointer",fontSize:15,zIndex:2}}>✕</button>
         <div style={{marginBottom:16}}>
-          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,color:"#fff",margin:0}}>🧠 Memory Match</h2>
+          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,color:"#fff",margin:0}}>{meta.icon} {meta.title}</h2>
         </div>
         <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column"}}>
           {mode==="leaderboard"
-            ?<LeaderboardOnly onPlay={()=>setMode("play")}/>
-            :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
+            ?<LeaderboardOnly gameId={meta.leaderboardId} title={meta.title} onPlay={()=>setMode("play")}/>
+            :gameId==="dino"
+              ?<DinoGame defaultName={defaultName} onExit={onClose}/>
+              :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
           }
         </div>
       </Glass>
@@ -531,7 +748,7 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
 // ── Game hub ─────────────────────────────────────────────────────────────────
 const GAMES_LIST = [
   {id:"memory",name:"Memory Match",icon:"🧠",desc:"Flip cards, find pairs, don't run out of hearts.",active:true},
-  {id:"soon1",name:"Coming Soon",icon:"🎲",desc:"A new game is being built for the dojo!",active:false},
+  {id:"dino",name:"Dino Runner",icon:"🦖",desc:"Jump the cacti in this classic offline runner.",active:true},
   {id:"soon2",name:"Coming Soon",icon:"🕹️",desc:"A new game is being built for the dojo!",active:false},
 ];
 
