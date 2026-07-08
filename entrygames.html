@@ -170,6 +170,8 @@ const NAV=[
   {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
   {id:"games",icon:"🎮",label:"Games",href:"games.html"},
 ];
+  function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
   return(
