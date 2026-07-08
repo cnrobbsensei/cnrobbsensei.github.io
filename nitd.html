@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Code Ninjas – In The Dojo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#060609;color:#fff;}
+#root{min-height:100vh;display:flex;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.3}}
+@media(max-width:768px){#root{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const firebaseConfig = {
+  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
+  authDomain:"githubpat-2d39d.firebaseapp.com",
+  projectId:"githubpat-2d39d",
+  storageBucket:"githubpat-2d39d.firebasestorage.app",
+  messagingSenderId:"375553339098",
+  appId:"1:375553339098:web:729bb04215f50217937fe3",
+  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+window.fbLeaderboard = {
+  async getAll(){
+    const snap = await db.ref("leaderboards").once("value");
+    const val = snap.val() || {};
+    const all = [];
+    for(const weekKey of Object.keys(val)){
+      const week = parseInt(weekKey.replace("week_",""));
+      const entries = val[weekKey].entries || {};
+      for(const [id,entry] of Object.entries(entries)){
+        all.push({id,week,...entry});
+      }
+    }
+    return all;
+  }
+};
+</script>
+<script type="text/babel">
+const {useState,useEffect} = React;
+
+const WEEK_START = new Date("2026-05-14T00:00:00");
+function getCurrentWeek(){
+  const diff = new Date() - WEEK_START;
+  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
+}
+function todayStr(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function todayLabel(){
+  return new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
+}
+
+function Glass({children,style={}}){
+  return(
+    <div style={{
+      background:"rgba(255,255,255,0.06)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
+      border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",...style
+    }}>{children}</div>
+  );
+}
+function LoadingScreen({status}){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:36,height:36,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
+    </div>
+  );
+}
+function useIsMobile(){
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return mobile;
+}
+const NAV=[
+  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
+  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
+  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
+  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
+  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
+  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
+  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
+];
+function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+
+function MobileNav({active,isAdmin,isStudent,studentUsername}){
+  const [open,setOpen]=useState(false);
+  return(
+    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{padding:"3px 8px",borderRadius:99,
+            background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+            border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,
+            color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
+          </div>
+          <button onClick={()=>setOpen(!open)} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",padding:"6px 10px",cursor:"pointer",fontSize:16}}>{open?"✕":"☰"}</button>
+        </div>
+      </div>
+      {open&&(
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+          {NAV.map(item=>(
+            <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+              display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
+              background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
+              color:active===item.id?"#fff":"rgba(255,255,255,0.6)"}}>
+              <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+            </button>
+          ))}
+          <button onClick={doLogout} style={{padding:"9px 14px",borderRadius:10,border:"1px solid rgba(255,45,120,0.3)",background:"rgba(255,45,120,0.08)",color:"#ff2d78",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1}}>← LOG OUT</button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Sidebar({active,isAdmin,isStudent,studentUsername}){
+  return(
+    <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",padding:"22px 14px",gap:6,
+      background:"rgba(0,0,0,0.35)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
+      borderRight:"1px solid rgba(255,255,255,0.06)",zIndex:10,position:"sticky",top:0}}>
+      <div style={{padding:"10px 10px 20px",textAlign:"center"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
+        <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+          background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+          border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
+          <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",letterSpacing:1,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"ADMIN":isStudent?studentUsername:"GUEST"}
+          </span>
+        </div>
+      </div>
+      {NAV.map(item=>(
+        <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+          display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
+          fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
+          background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
+          color:active===item.id?"#fff":"rgba(255,255,255,0.4)",
+          boxShadow:active===item.id?"inset 0 0 0 1px rgba(57,255,20,0.3),0 0 16px rgba(57,255,20,0.1)":"none"}}
+          onMouseEnter={e=>{if(active!==item.id){e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="#fff";}}}
+          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
+          <span style={{fontSize:17}}>{item.icon}</span>{item.label}
+        </button>
+      ))}
+      <div style={{marginTop:"auto",padding:"0 0 4px"}}>
+        <Glass style={{padding:"11px 14px",marginBottom:8}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+        </Glass>
+        <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
+          background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
+          fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1,transition:"all .2s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,45,120,0.1)";e.currentTarget.style.borderColor="#ff2d7844";e.currentTarget.style.color="#ff2d78";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.03)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";e.currentTarget.style.color="rgba(255,255,255,0.35)";}}>
+          ← LOG OUT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NITDTab({allEntries,onRefresh,refreshing}){
+  const today = todayStr();
+  const todayEntries = allEntries.filter(e=>e.date===today);
+
+  // Group by ninja name -> total points today, attempt count, most-recent ts (we don't have ts on
+  // leaderboard entries, so we just use insertion order as a proxy for "most recently active")
+  const map = {};
+  const order = [];
+  todayEntries.forEach((e,i)=>{
+    const key = e.name.trim();
+    if(!map[key]){ map[key]={name:key,points:0,attempts:0,firstSeenIdx:i}; order.push(key); }
+    map[key].points += e.points;
+    map[key].attempts += 1;
+  });
+  const present = Object.values(map).sort((a,b)=>b.firstSeenIdx-a.firstSeenIdx);
+
+  return(
+    <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:8,flexWrap:"wrap"}}>
+        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,22px)",color:"#fff",margin:0,
+          background:"linear-gradient(135deg,#00cfff,#39ff14)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
+          📍 Ninjas In The Dojo
+        </h2>
+        <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:99,
+          background:"rgba(57,255,20,0.1)",border:"1px solid #39ff1444"}}>
+          <span style={{width:7,height:7,borderRadius:"50%",background:"#39ff14",animation:"pulseDot 1.6s ease-in-out infinite"}}/>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14"}}>LIVE</span>
+        </div>
+        <button onClick={onRefresh} disabled={refreshing}
+          style={{marginLeft:"auto",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",
+            borderRadius:8,color:"rgba(255,255,255,0.6)",padding:"6px 14px",cursor:refreshing?"not-allowed":"pointer",
+            fontFamily:"'Fira Code',monospace",fontSize:11}}>
+          {refreshing?"↻ Refreshing...":"↻ Refresh"}
+        </button>
+      </div>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:24}}>
+        {todayLabel()} · Based on Ring Toss score entries logged today
+      </p>
+
+      <Glass style={{padding:"16px 20px",marginBottom:24,borderColor:"#00cfff33",background:"rgba(0,207,255,0.05)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
+          <div style={{fontSize:30}}>🥷</div>
+          <div>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:20,color:"#00cfff"}}>{present.length}</div>
+            <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)"}}>ninja{present.length!==1?"s":""} checked in today</div>
+          </div>
+        </div>
+      </Glass>
+
+      {present.length===0?(
+        <Glass style={{padding:40,textAlign:"center"}}>
+          <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>
+            No score entries yet today. Once ninjas play Ring Toss, they'll show up here! 🥷
+          </p>
+        </Glass>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}>
+          {present.map((p,i)=>(
+            <Glass key={p.name} style={{padding:"16px 18px",borderColor:"rgba(57,255,20,0.2)",
+              animation:`fadeUp .35s ease both ${i*.04}s`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#39ff14,#00cfff)",
+                  display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>🥷</div>
+                <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:14,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {p.name}
+                </div>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontFamily:"'Fira Code',monospace",fontSize:10}}>
+                <span style={{color:"rgba(255,255,255,0.35)"}}>{p.attempts} attempt{p.attempts!==1?"s":""} today</span>
+                <span style={{color:"#39ff14",fontWeight:700}}>{p.points.toLocaleString()} pts</span>
+              </div>
+            </Glass>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NITDApp(){
+  const [auth,setAuth]=useState(null);
+  const [allEntries,setAllEntries]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [refreshing,setRefreshing]=useState(false);
+  const isMobile=useIsMobile();
+
+  async function load(showSpinner){
+    if(showSpinner) setRefreshing(true);
+    try{ setAllEntries(await window.fbLeaderboard.getAll()); }catch(e){console.warn(e);}
+    if(showSpinner) setRefreshing(false);
+  }
+
+  useEffect(()=>{
+    const role = localStorage.getItem("cn_role");
+    if(!role){ window.location.href="index.html"; return; }
+    setAuth({role,username:localStorage.getItem("cn_username")});
+    (async()=>{ await load(false); setLoading(false); })();
+  },[]);
+
+  useEffect(()=>{
+    if(!auth) return;
+    const iv=setInterval(()=>load(false),30000);
+    return ()=>clearInterval(iv);
+  },[auth]);
+
+  if(!auth||loading) return <LoadingScreen status="Checking the dojo..."/>;
+  const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
+
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",minHeight:"100vh",position:"relative",zIndex:1,width:"100%"}}>
+        {isMobile
+          ?<MobileNav active="nitd" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+          :<Sidebar active="nitd" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+        }
+        <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
+          <NITDTab allEntries={allEntries} onRefresh={()=>load(true)} refreshing={refreshing}/>
+        </div>
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<NITDApp/>);
+</script>
+</body>
+</html>
