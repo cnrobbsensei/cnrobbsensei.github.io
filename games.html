@@ -50,6 +50,12 @@ window.cnKeySafe = function(str){
   return String(str).trim().toLowerCase().replace(/[.#$\[\]]/g,"_");
 };
 
+// Breaks auto-expire after this many milliseconds (10 minutes). Must match nitd.html exactly.
+window.BREAK_DURATION_MS = 10*60*1000;
+window.cnIsBreakActive = function(entry){
+  return !!(entry && entry.startedAt && (Date.now()-entry.startedAt < window.BREAK_DURATION_MS));
+};
+
 window.fbGames = {
   async getSettings(){
     const snap = await db.ref("games/settings").once("value");
@@ -58,11 +64,15 @@ window.fbGames = {
   async setBreakMode(v){
     await db.ref("games/settings").update({breakMode:v});
   },
-  // Per-student break flag, set from the "Start Break" button on the In The Dojo page.
-  async isStudentOnBreak(username){
-    if(!username) return false;
-    const snap = await db.ref(`games/onBreak/${window.cnKeySafe(username)}`).once("value");
-    return !!snap.val();
+  // Live-watches this student's break flag (set from the "Start Break" button on the
+  // In The Dojo page) and fires the callback immediately whenever it changes, so a
+  // Sensei ending a break instantly kicks the student out of whatever game they're in.
+  watchStudentBreak(username, callback){
+    if(!username) return ()=>{};
+    const ref = db.ref(`games/onBreak/${window.cnKeySafe(username)}`);
+    const handler = snap => callback(snap.val());
+    ref.on("value", handler);
+    return ()=> ref.off("value", handler);
   },
   async getLeaderboard(gameId){
     const snap = await db.ref(`games/${gameId}/leaderboard`).once("value");
@@ -231,12 +241,15 @@ function makeDeck(){
 }
 
 function MemoryMatchGame({defaultName,onExit}){
-  const [hearts,setHearts]=useState(3);
+  const MAX_HEARTS = 5;
+  const PREVIEW_MS = 2000;
+  const [hearts,setHearts]=useState(MAX_HEARTS);
   const [score,setScore]=useState(0);
   const [round,setRound]=useState(1);
   const [deck,setDeck]=useState(()=>makeDeck());
   const [flipped,setFlipped]=useState([]);
   const [locked,setLocked]=useState(false);
+  const [previewing,setPreviewing]=useState(true);
   const [gameOver,setGameOver]=useState(false);
   const [shakeIdx,setShakeIdx]=useState([]);
   const [name,setName]=useState(defaultName||"");
@@ -247,6 +260,19 @@ function MemoryMatchGame({defaultName,onExit}){
   const timers=useRef([]);
 
   useEffect(()=>()=>{ timers.current.forEach(clearTimeout); },[]);
+
+  // Briefly reveal the whole board at the start of every round so ninjas can memorize it,
+  // then flip everything face-down and unlock play.
+  useEffect(()=>{
+    setPreviewing(true);
+    setLocked(true);
+    const t=setTimeout(()=>{
+      setPreviewing(false);
+      setLocked(false);
+    },PREVIEW_MS);
+    timers.current.push(t);
+    return ()=>clearTimeout(t);
+  },[deck]);
 
   useEffect(()=>{
     if(deck.length && deck.every(c=>c.matched)){
@@ -313,7 +339,7 @@ function MemoryMatchGame({defaultName,onExit}){
   }
 
   function playAgain(){
-    setHearts(3);setScore(0);setRound(1);setDeck(makeDeck());
+    setHearts(MAX_HEARTS);setScore(0);setRound(1);setDeck(makeDeck());
     setFlipped([]);setLocked(false);setGameOver(false);
     setSubmitted(false);setMadeIt(false);setLeaderboard(null);
   }
@@ -323,9 +349,9 @@ function MemoryMatchGame({defaultName,onExit}){
       {!gameOver?(
         <>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
-            <div style={{display:"flex",gap:6}}>
-              {[0,1,2].map(i=>(
-                <span key={i} style={{fontSize:22,animation:hearts===i+1?"heartLose .3s ease":"none"}}>
+            <div style={{display:"flex",gap:5}}>
+              {Array.from({length:MAX_HEARTS}).map((_,i)=>(
+                <span key={i} style={{fontSize:19,animation:hearts===i+1?"heartLose .3s ease":"none"}}>
                   {i<hearts?"❤️":"🖤"}
                 </span>
               ))}
@@ -337,12 +363,12 @@ function MemoryMatchGame({defaultName,onExit}){
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8,flex:1,alignContent:"center"}}>
             {deck.map((card,idx)=>{
-              const isUp = flipped.includes(idx)||card.matched;
+              const isUp = previewing||flipped.includes(idx)||card.matched;
               const isShaking = shakeIdx.includes(idx);
               return(
                 <div key={card.id} onClick={()=>handleCardClick(idx)}
                   style={{
-                    aspectRatio:"1",borderRadius:10,cursor:card.matched?"default":"pointer",
+                    aspectRatio:"1",borderRadius:10,cursor:(card.matched||previewing)?"default":"pointer",
                     display:"flex",alignItems:"center",justifyContent:"center",fontSize:"clamp(20px,5vw,28px)",
                     userSelect:"none",transition:"transform .15s, background .2s, border-color .2s",
                     animation:isShaking?"shakeCard .4s ease":card.matched?"cardPop .3s ease":"none",
@@ -356,8 +382,8 @@ function MemoryMatchGame({defaultName,onExit}){
               );
             })}
           </div>
-          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:14}}>
-            Match all pairs to advance — it never ends until you're out of hearts!
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:previewing?"#ffd700":"rgba(255,255,255,0.25)",textAlign:"center",marginTop:14}}>
+            {previewing?"👀 Memorize the board...":"Match all pairs to advance — it never ends until you're out of hearts!"}
           </p>
         </>
       ):(
@@ -477,7 +503,7 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
     window.addEventListener("keydown",onKey);
     return ()=>window.removeEventListener("keydown",onKey);
   },[]);
-  return(
+  return ReactDOM.createPortal(
     <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(2,2,6,0.85)",backdropFilter:"blur(6px)",
       display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <Glass style={{width:"100%",maxWidth:460,maxHeight:"88vh",padding:"22px",position:"relative",
@@ -497,7 +523,8 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
           }
         </div>
       </Glass>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -512,24 +539,25 @@ function GamesTab({isAdmin,studentUsername}){
   const [settings,setSettings]=useState(null);
   const [savingSetting,setSavingSetting]=useState(false);
   const [modal,setModal]=useState(null); // {gameId, mode}
-  const [myBreakOn,setMyBreakOn]=useState(false);
+  const [breakData,setBreakData]=useState(null);
+  const [nowTick,setNowTick]=useState(Date.now());
 
   useEffect(()=>{
     window.fbGames.getSettings().then(setSettings).catch(()=>setSettings({breakMode:false}));
   },[]);
 
+  // Live-listen for this student's break flag so ending it (or it expiring) is reflected instantly.
   useEffect(()=>{
     if(!studentUsername) return;
-    let cancelled=false;
-    function checkMyBreak(){
-      window.fbGames.isStudentOnBreak(studentUsername)
-        .then(v=>{ if(!cancelled) setMyBreakOn(v); })
-        .catch(e=>console.warn(e));
-    }
-    checkMyBreak();
-    const iv=setInterval(checkMyBreak,15000);
-    return ()=>{ cancelled=true; clearInterval(iv); };
+    const unsubscribe = window.fbGames.watchStudentBreak(studentUsername, setBreakData);
+    return unsubscribe;
   },[studentUsername]);
+
+  // Ticks every 5s so a break that hits the 10-minute mark auto-locks even with no new Firebase write.
+  useEffect(()=>{
+    const iv=setInterval(()=>setNowTick(Date.now()),5000);
+    return ()=>clearInterval(iv);
+  },[]);
 
   async function toggleBreak(){
     if(!settings||savingSetting) return;
@@ -543,7 +571,15 @@ function GamesTab({isAdmin,studentUsername}){
   }
 
   const breakOn = settings&&settings.breakMode;
+  const myBreakOn = window.cnIsBreakActive(breakData);
   const locked = !isAdmin && !breakOn && !myBreakOn;
+  const remainingMs = (myBreakOn && breakData&&breakData.startedAt) ? Math.max(0,(breakData.startedAt+window.BREAK_DURATION_MS)-nowTick) : 0;
+  const remainingLabel = remainingMs>0 ? `${Math.floor(remainingMs/60000)}:${String(Math.floor((remainingMs%60000)/1000)).padStart(2,"0")}` : null;
+
+  // If a break ends (manually stopped, or it expires) while a game is open, close it and lock immediately.
+  useEffect(()=>{
+    if(locked && modal){ setModal(null); }
+  },[locked]);
 
   return(
     <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
@@ -565,7 +601,7 @@ function GamesTab({isAdmin,studentUsername}){
             background:myBreakOn?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.05)",
             border:`1px solid ${myBreakOn?"#39ff1444":"rgba(255,255,255,0.1)"}`,
             fontFamily:"'Fira Code',monospace",fontSize:9,color:myBreakOn?"#39ff14":"rgba(255,255,255,0.35)"}}>
-            {myBreakOn?"🥷 YOUR BREAK IS ON":"⏳ WAITING FOR YOUR BREAK"}
+            {myBreakOn?`🥷 YOUR BREAK IS ON · ${remainingLabel}`:"⏳ WAITING FOR YOUR BREAK"}
           </div>
         )}
       </div>
