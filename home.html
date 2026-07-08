@@ -157,7 +157,7 @@ function useIsMobile(){
   return mobile;
 }
 
-const NAV=[{id:"home",icon:"🏠",label:"Home",href:"home.html"},{id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},{id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},{id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},{id:"polls",icon:"📊",label:"Polls",href:"polls.html"}];
+const NAV=[{id:"home",icon:"🏠",label:"Home",href:"home.html"},{id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},{id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},{id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},{id:"polls",icon:"📊",label:"Polls",href:"polls.html"},{ label: "🥷 Ninjas in the Dojo", href: "nitd.html", roles: ["admin"] },{ label: "🎮 Games", href: "games.html", roles: ["admin","student"] ];
 
 function doLogout(){
   localStorage.removeItem("cn_role");
