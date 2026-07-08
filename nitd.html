@@ -77,6 +77,12 @@ window.fbUsernames = {
   }
 };
 
+// Breaks auto-expire after this many milliseconds (10 minutes).
+window.BREAK_DURATION_MS = 10*60*1000;
+window.cnIsBreakActive = function(entry){
+  return !!(entry && entry.startedAt && (Date.now()-entry.startedAt < window.BREAK_DURATION_MS));
+};
+
 window.fbBreak = {
   // Per-student "on break" flags, keyed by a sanitized version of their username.
   async getAll(){
@@ -84,7 +90,7 @@ window.fbBreak = {
     return snap.val() || {};
   },
   async setBreak(usernameKey, on){
-    if(on){ await db.ref(`games/onBreak/${usernameKey}`).set(true); }
+    if(on){ await db.ref(`games/onBreak/${usernameKey}`).set({startedAt: Date.now()}); }
     else{ await db.ref(`games/onBreak/${usernameKey}`).remove(); }
   }
 };
@@ -106,6 +112,17 @@ function findLinkedAccount(firstName, usernames){
   if(match) return match;
   match = usernames.find(u=>u.toLowerCase()===target);
   return match || null;
+}
+
+// Drops any break flags that have passed the 10-minute mark, and best-effort
+// clears them out of Firebase so other admins see "Start Break" again.
+function cleanExpiredBreaks(breaks){
+  const cleaned = {};
+  Object.entries(breaks).forEach(([key,entry])=>{
+    if(window.cnIsBreakActive(entry)) cleaned[key]=entry;
+    else if(entry) window.fbBreak.setBreak(key,false).catch(()=>{});
+  });
+  return cleaned;
 }
 
 const WEEK_START = new Date("2026-05-14T00:00:00");
@@ -241,6 +258,12 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
   const today = todayStr();
   const todayEntries = allEntries.filter(e=>e.date===today);
   const [togglingAccount,setTogglingAccount]=useState(null);
+  const [nowTick,setNowTick]=useState(Date.now());
+
+  useEffect(()=>{
+    const iv=setInterval(()=>setNowTick(Date.now()),15000);
+    return ()=>clearInterval(iv);
+  },[]);
 
   // Group by ninja name -> total points today, attempt count, most-recent ts (we don't have ts on
   // leaderboard entries, so we just use insertion order as a proxy for "most recently active")
@@ -310,7 +333,9 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:14}}>
           {present.map((p,i)=>{
             const account = findLinkedAccount(p.name, usernames);
-            const onBreak = account ? !!breakStatuses[window.cnKeySafe(account)] : false;
+            const breakEntry = account ? breakStatuses[window.cnKeySafe(account)] : null;
+            const onBreak = window.cnIsBreakActive(breakEntry);
+            const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.BREAK_DURATION_MS-nowTick)/60000)) : 0;
             return(
               <Glass key={p.name} style={{padding:"16px 18px",borderColor:"rgba(57,255,20,0.2)",
                 animation:`fadeUp .35s ease both ${i*.04}s`}}>
@@ -344,7 +369,7 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
                       background:!account?"rgba(255,255,255,0.06)":onBreak?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#39ff14,#00cfff)",
                       color:!account?"rgba(255,255,255,0.3)":"#000",
                       fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
-                    {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?"⏹ End Break":"▶ Start Break"}
+                    {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?`⏹ End Break (${remainingMin}m left)`:"▶ Start Break"}
                   </button>
                 )}
               </Glass>
@@ -375,13 +400,13 @@ function NITDApp(){
       ]);
       setAllEntries(entries);
       setUsernames(unames);
-      setBreakStatuses(breaks);
+      setBreakStatuses(cleanExpiredBreaks(breaks));
     }catch(e){console.warn(e);}
     if(showSpinner) setRefreshing(false);
   }
 
   async function reloadBreakStatuses(){
-    try{ setBreakStatuses(await window.fbBreak.getAll()); }catch(e){console.warn(e);}
+    try{ setBreakStatuses(cleanExpiredBreaks(await window.fbBreak.getAll())); }catch(e){console.warn(e);}
   }
 
   useEffect(()=>{
