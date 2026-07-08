@@ -44,6 +44,12 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.database();
 
+// Cross-referencing helper: turns a username like "adam.dodo" into a Firebase-safe key
+// (Realtime Database keys can't contain '.', '#', '$', '[', ']'). Must match nitd.html exactly.
+window.cnKeySafe = function(str){
+  return String(str).trim().toLowerCase().replace(/[.#$\[\]]/g,"_");
+};
+
 window.fbGames = {
   async getSettings(){
     const snap = await db.ref("games/settings").once("value");
@@ -51,6 +57,12 @@ window.fbGames = {
   },
   async setBreakMode(v){
     await db.ref("games/settings").update({breakMode:v});
+  },
+  // Per-student break flag, set from the "Start Break" button on the In The Dojo page.
+  async isStudentOnBreak(username){
+    if(!username) return false;
+    const snap = await db.ref(`games/onBreak/${window.cnKeySafe(username)}`).once("value");
+    return !!snap.val();
   },
   async getLeaderboard(gameId){
     const snap = await db.ref(`games/${gameId}/leaderboard`).once("value");
@@ -500,10 +512,24 @@ function GamesTab({isAdmin,studentUsername}){
   const [settings,setSettings]=useState(null);
   const [savingSetting,setSavingSetting]=useState(false);
   const [modal,setModal]=useState(null); // {gameId, mode}
+  const [myBreakOn,setMyBreakOn]=useState(false);
 
   useEffect(()=>{
     window.fbGames.getSettings().then(setSettings).catch(()=>setSettings({breakMode:false}));
   },[]);
+
+  useEffect(()=>{
+    if(!studentUsername) return;
+    let cancelled=false;
+    function checkMyBreak(){
+      window.fbGames.isStudentOnBreak(studentUsername)
+        .then(v=>{ if(!cancelled) setMyBreakOn(v); })
+        .catch(e=>console.warn(e));
+    }
+    checkMyBreak();
+    const iv=setInterval(checkMyBreak,15000);
+    return ()=>{ cancelled=true; clearInterval(iv); };
+  },[studentUsername]);
 
   async function toggleBreak(){
     if(!settings||savingSetting) return;
@@ -517,7 +543,7 @@ function GamesTab({isAdmin,studentUsername}){
   }
 
   const breakOn = settings&&settings.breakMode;
-  const locked = !isAdmin && !breakOn;
+  const locked = !isAdmin && !breakOn && !myBreakOn;
 
   return(
     <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
@@ -532,6 +558,14 @@ function GamesTab({isAdmin,studentUsername}){
             border:`1px solid ${breakOn?"#39ff1444":"#ff2d7844"}`,
             fontFamily:"'Fira Code',monospace",fontSize:9,color:breakOn?"#39ff14":"#ff2d78"}}>
             {breakOn?"🟢 BREAK MODE ACTIVE":"🔴 GAMES LOCKED"}
+          </div>
+        )}
+        {!isAdmin&&studentUsername&&!breakOn&&(
+          <div style={{padding:"4px 12px",borderRadius:99,
+            background:myBreakOn?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.05)",
+            border:`1px solid ${myBreakOn?"#39ff1444":"rgba(255,255,255,0.1)"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,color:myBreakOn?"#39ff14":"rgba(255,255,255,0.35)"}}>
+            {myBreakOn?"🥷 YOUR BREAK IS ON":"⏳ WAITING FOR YOUR BREAK"}
           </div>
         )}
       </div>
