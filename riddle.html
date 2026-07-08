@@ -138,7 +138,15 @@ function useIsMobile(){
   useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
   return mobile;
 }
-const NAV=[{id:"home",icon:"🏠",label:"Home",href:"home.html"},{id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},{id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},{id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},{id:"polls",icon:"📊",label:"Polls",href:"polls.html"}];
+const NAV=[
+  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
+  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
+  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
+  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
+  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
+  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
+  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
+];
 function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
 
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
