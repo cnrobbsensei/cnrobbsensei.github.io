@@ -668,6 +668,271 @@ function DinoGame({defaultName,onExit}){
   );
 }
 
+// ── Dadish game (radish platform-jumper: dodge rocks, grab gems, use a double jump) ──
+function DadishGame({defaultName,onExit}){
+  const canvasRef = useRef(null);
+  const rafRef = useRef(null);
+  const stateRef = useRef({
+    y:0,velY:0,jumpsUsed:0,obstacles:[],gems:[],speed:210,distance:0,
+    obstacleTimer:0,gemTimer:0,running:true,coins:0
+  });
+  const [score,setScore]=useState(0);
+  const [coins,setCoins]=useState(0);
+  const [gameOver,setGameOver]=useState(false);
+  const [name,setName]=useState(defaultName||"");
+  const [submitting,setSubmitting]=useState(false);
+  const [submitted,setSubmitted]=useState(false);
+  const [madeIt,setMadeIt]=useState(false);
+  const [leaderboard,setLeaderboard]=useState(null);
+
+  const W=360,H=180;
+  const GROUND_Y=H-26;
+  const PLAYER_SIZE=26;
+  const PLAYER_X=40;
+  const GRAVITY=1850;
+  const JUMP_V=-600;
+  const MAX_JUMPS=2; // double jump is Dadish's signature move
+
+  function reset(){
+    stateRef.current={y:GROUND_Y-PLAYER_SIZE,velY:0,jumpsUsed:0,obstacles:[],gems:[],speed:210,distance:0,
+      obstacleTimer:0.9,gemTimer:1.4,running:true,coins:0};
+    setScore(0);setCoins(0);setGameOver(false);setSubmitted(false);setMadeIt(false);setLeaderboard(null);
+  }
+
+  function jump(){
+    const st=stateRef.current;
+    if(!st.running) return;
+    if(st.jumpsUsed < MAX_JUMPS){
+      st.velY = JUMP_V;
+      st.jumpsUsed += 1;
+    }
+  }
+
+  useEffect(()=>{
+    reset();
+    let last = performance.now();
+    let acc = 0;
+    function draw(){
+      const canvas=canvasRef.current; if(!canvas) return;
+      const ctx=canvas.getContext("2d");
+      ctx.clearRect(0,0,W,H);
+      // dirt ground
+      ctx.fillStyle="rgba(139,90,43,0.35)";
+      ctx.fillRect(0,GROUND_Y+PLAYER_SIZE-2,W,H-(GROUND_Y+PLAYER_SIZE-2));
+      ctx.strokeStyle="rgba(255,255,255,0.25)";
+      ctx.beginPath();ctx.moveTo(0,GROUND_Y+PLAYER_SIZE);ctx.lineTo(W,GROUND_Y+PLAYER_SIZE);ctx.stroke();
+
+      const st=stateRef.current;
+      // radish player: pink/magenta bulb + green leaf top
+      const px=PLAYER_X, py=st.y;
+      ctx.fillStyle="#ff2d9e";
+      ctx.shadowColor="#ff2d9e";ctx.shadowBlur=8;
+      ctx.beginPath();
+      ctx.ellipse(px+PLAYER_SIZE/2, py+PLAYER_SIZE*0.6, PLAYER_SIZE/2, PLAYER_SIZE*0.42, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur=0;
+      ctx.fillStyle="#39ff14";
+      ctx.beginPath();
+      ctx.moveTo(px+PLAYER_SIZE*0.3, py+PLAYER_SIZE*0.25);
+      ctx.lineTo(px+PLAYER_SIZE*0.5, py-6);
+      ctx.lineTo(px+PLAYER_SIZE*0.7, py+PLAYER_SIZE*0.25);
+      ctx.closePath();
+      ctx.fill();
+
+      // rock obstacles
+      ctx.fillStyle="#7a7a85";
+      st.obstacles.forEach(o=>{
+        ctx.beginPath();
+        ctx.ellipse(o.x+o.w/2, GROUND_Y+PLAYER_SIZE-o.h/2, o.w/2, o.h/2, 0, 0, Math.PI*2);
+        ctx.fill();
+      });
+
+      // gem coins
+      ctx.fillStyle="#ffd700";
+      st.gems.forEach(g=>{
+        if(g.collected) return;
+        ctx.beginPath();
+        ctx.arc(g.x, g.y, 7, 0, Math.PI*2);
+        ctx.fill();
+      });
+    }
+    function loop(now){
+      const dt=Math.min(0.033,(now-last)/1000);
+      last=now;
+      const st=stateRef.current;
+      if(st.running){
+        st.velY += GRAVITY*dt;
+        st.y += st.velY*dt;
+        if(st.y > GROUND_Y-PLAYER_SIZE){ st.y=GROUND_Y-PLAYER_SIZE; st.velY=0; st.jumpsUsed=0; }
+
+        st.distance += st.speed*dt;
+        st.speed = 210 + Math.min(240, st.distance*0.018);
+
+        st.obstacleTimer -= dt;
+        if(st.obstacleTimer<=0){
+          const h = 20+Math.random()*18;
+          st.obstacles.push({x:W, w:20+Math.random()*10, h});
+          st.obstacleTimer = Math.max(0.55, 1.15 - Math.min(0.5, st.distance*0.00005) + Math.random()*0.6);
+        }
+        st.gemTimer -= dt;
+        if(st.gemTimer<=0){
+          st.gems.push({x:W, y:GROUND_Y-40-Math.random()*40, collected:false});
+          st.gemTimer = 0.9+Math.random()*1.2;
+        }
+
+        st.obstacles.forEach(o=>{ o.x -= st.speed*dt; });
+        st.obstacles = st.obstacles.filter(o=>o.x+o.w>-5);
+        st.gems.forEach(g=>{ g.x -= st.speed*dt; });
+        st.gems = st.gems.filter(g=>g.x>-15 && !g.collected);
+
+        const pRect = {x:PLAYER_X+3,y:st.y+3,w:PLAYER_SIZE-6,h:PLAYER_SIZE-6};
+        for(const o of st.obstacles){
+          const oRect={x:o.x,y:GROUND_Y+PLAYER_SIZE-o.h,w:o.w,h:o.h};
+          if(pRect.x < oRect.x+oRect.w && pRect.x+pRect.w > oRect.x &&
+             pRect.y < oRect.y+oRect.h && pRect.y+pRect.h > oRect.y){
+            st.running=false;
+            setGameOver(true);
+          }
+        }
+        for(const g of st.gems){
+          if(g.collected) continue;
+          const dx=(PLAYER_X+PLAYER_SIZE/2)-g.x, dy=(st.y+PLAYER_SIZE/2)-g.y;
+          if(Math.sqrt(dx*dx+dy*dy) < PLAYER_SIZE*0.6){
+            g.collected=true;
+            st.coins += 1;
+            setCoins(st.coins);
+          }
+        }
+        acc+=dt;
+        if(acc>0.1){ acc=0; setScore(Math.floor(st.distance/5)+st.coins*10); }
+      }
+      draw();
+      rafRef.current = requestAnimationFrame(loop);
+    }
+    rafRef.current = requestAnimationFrame(loop);
+    return ()=>cancelAnimationFrame(rafRef.current);
+  },[]);
+
+  useEffect(()=>{
+    function onKey(e){ if(e.code==="Space"||e.code==="ArrowUp"){ e.preventDefault(); jump(); } }
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[]);
+
+  useEffect(()=>{
+    if(gameOver){
+      window.fbGames.getLeaderboard("dadish").then(setLeaderboard).catch(()=>setLeaderboard([]));
+    }
+  },[gameOver]);
+
+  async function saveScore(){
+    if(!name.trim()||submitting||submitted) return;
+    setSubmitting(true);
+    try{
+      const {top5,madeIt:mi} = await window.fbGames.submitScore("dadish",name.trim(),score);
+      setLeaderboard(top5);
+      setMadeIt(mi);
+      setSubmitted(true);
+    } catch(e){ console.warn(e); }
+    setSubmitting(false);
+  }
+
+  function playAgain(){ reset(); }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {!gameOver?(
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:8}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.4)"}}>TAP / CLICK / SPACE — DOUBLE JUMP WORKS!</span>
+            <div style={{display:"flex",gap:12,fontFamily:"'Fira Code',monospace",fontSize:12}}>
+              <span style={{color:"#ffd700"}}>💎 <b>{coins}</b></span>
+              <span style={{color:"#39ff14"}}>SCORE <b>{score}</b></span>
+            </div>
+          </div>
+          <div onClick={jump} onTouchStart={e=>{e.preventDefault();jump();}}
+            style={{borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.15)",
+              background:"rgba(255,255,255,0.03)",cursor:"pointer",touchAction:"none"}}>
+            <canvas ref={canvasRef} width={W} height={H} style={{display:"block",width:"100%",height:"auto"}}/>
+          </div>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:10}}>
+            Hop the rocks, grab the gems in the air — jump again mid-air for a double jump!
+          </p>
+        </>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:6,overflowY:"auto"}}>
+          <div style={{fontSize:40,marginBottom:4}}>🥕💥</div>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,color:"#ff2d78"}}>GAME OVER</h3>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:10}}>
+            Final Score: <b style={{color:"#39ff14"}}>{score}</b> · 💎 {coins} gems
+          </p>
+
+          {!submitted?(
+            <div style={{width:"100%",maxWidth:280,marginBottom:18}}>
+              <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:6,letterSpacing:1}}>SAVE YOUR SCORE</label>
+              <div style={{display:"flex",gap:8}}>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={iStyle(false)}/>
+                <button onClick={saveScore} disabled={!name.trim()||submitting}
+                  style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
+                    cursor:!name.trim()||submitting?"not-allowed":"pointer",
+                    background:!name.trim()||submitting?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                    color:!name.trim()||submitting?"rgba(255,255,255,0.3)":"#000",
+                    fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+                  {submitting?<Spinner/>:"SAVE"}
+                </button>
+              </div>
+            </div>
+          ):(
+            <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:madeIt?"#ffd700":"#39ff14",marginBottom:14}}>
+              {madeIt?"🏆 New Top 5 Leaderboard Entry!":"✅ Score submitted!"}
+            </p>
+          )}
+
+          <div style={{width:"100%",maxWidth:320}}>
+            <h4 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ffd700",marginBottom:10,letterSpacing:1}}>🏆 TOP 5 — DADISH</h4>
+            {leaderboard===null?(
+              <div style={{display:"flex",justifyContent:"center",padding:20}}><Spinner/></div>
+            ):leaderboard.length===0?(
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.35)"}}>No scores yet — you could be first!</p>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {leaderboard.map((e,i)=>{
+                  const isMe = submitted && e.name===name.trim() && e.score===score;
+                  const medal = i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`;
+                  return(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"8px 12px",borderRadius:8,
+                      background:isMe?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",
+                      border:`1px solid ${isMe?"#ffd70066":"rgba(255,255,255,0.08)"}`}}>
+                      <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,fontWeight:700,color:isMe?"#ffd700":"#fff"}}>{medal} {e.name}</span>
+                      <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"flex",gap:10,marginTop:20}}>
+            <button onClick={playAgain}
+              style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              ↻ PLAY AGAIN
+            </button>
+            <button onClick={onExit}
+              style={{padding:"10px 20px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",cursor:"pointer",
+                background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              EXIT
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeaderboardOnly({gameId,title,onPlay}){
   const [leaderboard,setLeaderboard]=useState(null);
   useEffect(()=>{
@@ -708,6 +973,7 @@ function LeaderboardOnly({gameId,title,onPlay}){
 const GAME_META = {
   memory: {title:"Memory Match", icon:"🧠", leaderboardId:"memoryMatch"},
   dino:   {title:"Dino Runner",  icon:"🦖", leaderboardId:"dino"},
+  dadish: {title:"Dadish",       icon:"🥕", leaderboardId:"dadish"},
 };
 
 function GameModal({gameId,initialMode,defaultName,onClose}){
@@ -736,7 +1002,9 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
             ?<LeaderboardOnly gameId={meta.leaderboardId} title={meta.title} onPlay={()=>setMode("play")}/>
             :gameId==="dino"
               ?<DinoGame defaultName={defaultName} onExit={onClose}/>
-              :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
+              :gameId==="dadish"
+                ?<DadishGame defaultName={defaultName} onExit={onClose}/>
+                :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
           }
         </div>
       </Glass>
@@ -749,7 +1017,7 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
 const GAMES_LIST = [
   {id:"memory",name:"Memory Match",icon:"🧠",desc:"Flip cards, find pairs, don't run out of hearts.",active:true},
   {id:"dino",name:"Dino Runner",icon:"🦖",desc:"Jump the cacti in this classic offline runner.",active:true},
-  {id:"soon2",name:"Coming Soon",icon:"🕹️",desc:"A new game is being built for the dojo!",active:false},
+  {id:"dadish",name:"Dadish",icon:"🥕",desc:"Hop rocks and grab gems — double jump included!",active:true},
 ];
 
 function GamesTab({isAdmin,studentUsername}){
