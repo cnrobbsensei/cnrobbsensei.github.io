@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
-<title>Code Ninjas – Ring Toss</title>
+<title>Code Ninjas – Points</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
@@ -31,62 +31,11 @@ select option{background:#0a0a0f;color:#fff;}
 </head>
 <body>
 <div id="root"></div>
-<script>
-const firebaseConfig = {
-  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
-  authDomain:"githubpat-2d39d.firebaseapp.com",
-  projectId:"githubpat-2d39d",
-  storageBucket:"githubpat-2d39d.firebasestorage.app",
-  messagingSenderId:"375553339098",
-  appId:"1:375553339098:web:729bb04215f50217937fe3",
-  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
-window.fbLeaderboard = {
-  async getAll(){
-    const snap = await db.ref("leaderboards").once("value");
-    const val = snap.val() || {};
-    const all = [];
-    for(const weekKey of Object.keys(val)){
-      const week = parseInt(weekKey.replace("week_",""));
-      const entries = val[weekKey].entries || {};
-      for(const [id,entry] of Object.entries(entries)){
-        all.push({id,week,...entry});
-      }
-    }
-    return all;
-  },
-  async addEntry(week,name,points,date){
-    const ref = db.ref(`leaderboards/week_${week}/entries`).push();
-    await ref.set({week,name,points,date});
-    return {id:ref.key};
-  },
-  async deleteEntry(week,entryId){
-    await db.ref(`leaderboards/week_${week}/entries/${entryId}`).remove();
-  }
-};
-</script>
+<script src="shared.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
 const MAX_ATTEMPTS_PER_DAY = 3;
 
-const WEEK_START = new Date("2026-05-14T00:00:00");
-function getCurrentWeek(){
-  const diff = new Date() - WEEK_START;
-  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
-}
-function getWeekLabel(n){
-  const s = new Date(WEEK_START.getTime()+(n-1)*7*24*60*60*1000);
-  const e = new Date(s.getTime()+6*24*60*60*1000);
-  const fmt = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
-  return `Week ${n} (${fmt(s)} – ${fmt(e)})`;
-}
-function todayStr(){
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
 function isInputWindowOpen(){ return true; }
 
 function groupEntries(entries){
@@ -161,16 +110,8 @@ function useIsMobile(){
   useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
   return mobile;
 }
-const NAV=[
-  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
-  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
-  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
-  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
-  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
-  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
-  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
-];
-  function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
 
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
@@ -240,7 +181,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
       <div style={{marginTop:"auto",padding:"0 0 4px"}}>
         <Glass style={{padding:"11px 14px",marginBottom:8}}>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
         </Glass>
         <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
           background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
@@ -263,36 +204,37 @@ function dowFromDateStr(dateStr){
 }
 
 function LeaderboardView({allEntries}){
-  const totalWeeks=getCurrentWeek()+1;
-  const [week,setWeek]=useState(getCurrentWeek());
+  const totalWeeks=window.getCurrentWeek()+1;
+  const [week,setWeek]=useState(window.getCurrentWeek());
   const weekEntries=allEntries.filter(e=>e.week===week);
   const grouped=groupEntries(weekEntries);
   const board=calcBoard(grouped);
 
   const dayBuckets = SESSION_DAYS.map(sd => ({...sd,rows: board.filter(row => dowFromDateStr(row.date) === sd.dow)})).filter(b => b.rows.length > 0);
-  const otherRows = board.filter(row => !SESSION_DAYS.find(s => s.dow === dowFromDateStr(row.date)));
+  const bucketedDates = new Set(dayBuckets.flatMap(b=>b.rows.map(r=>r.date)));
+  const otherRows = board.filter(row => !bucketedDates.has(row.date));
 
-  function DaySection({label, color, rows}){
+  function DaySection({label,color,rows}){
     return(
-      <div style={{marginBottom:28}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
-          <div style={{height:1,flex:1,background:`linear-gradient(90deg,${color}55,transparent)`}}/>
-          <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,fontWeight:700,color:color,letterSpacing:2,textShadow:`0 0 12px ${color}88`}}>{label.toUpperCase()}</span>
-          <div style={{height:1,flex:1,background:`linear-gradient(270deg,${color}55,transparent)`}}/>
+      <div style={{marginBottom:24}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color,margin:0,letterSpacing:1}}>{label.toUpperCase()}</h3>
+          <div style={{flex:1,height:1,background:`linear-gradient(90deg,${color}33,transparent)`}}/>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"44px 1fr 110px",gap:10,padding:"4px 16px",fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",letterSpacing:1.5,marginBottom:6}}>
-          <span>RANK</span><span>NINJA</span><span style={{textAlign:"right"}}>SCORE</span>
-        </div>
-        {rows.map((row,i)=>{
+        {rows.sort((a,b)=>b.points-a.points).map((row,i)=>{
           const rank=i+1;
-          const gc=rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":"transparent";
+          const gc=rank===1?"#ffd700":rank===2?"#c0c0c0":rank===3?"#cd7f32":color;
           return(
-            <Glass key={`${row.name}-${row.date}-${i}`} style={{padding:"11px 16px",marginBottom:7,
-              borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.07)",
-              boxShadow:rank<=3?`0 0 16px ${gc}22,0 4px 20px rgba(0,0,0,0.4)`:"0 4px 14px rgba(0,0,0,0.3)",
-              animation:`fadeUp .35s ease both ${i*.04}s`}}>
-              <div style={{display:"grid",gridTemplateColumns:"44px 1fr 110px",gap:10,alignItems:"center"}}>
-                <div style={{width:32,height:32,borderRadius:"50%",flexShrink:0,background:rank<=3?`linear-gradient(135deg,${gc},${gc}99)`:"rgba(255,255,255,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,fontSize:rank<=3?13:11,color:rank<=3?"#000":"#999"}}>
+            <Glass key={row.name+row.date} style={{padding:"12px 18px",marginBottom:8,
+              borderColor:rank<=3?`${gc}44`:"rgba(255,255,255,0.08)",
+              boxShadow:rank<=3?`0 0 18px ${gc}22,0 4px 20px rgba(0,0,0,0.4)`:"0 4px 14px rgba(0,0,0,0.3)",
+              animation:`fadeUp .35s ease both ${i*.05}s`}}>
+              <div style={{display:"grid",gridTemplateColumns:"40px 1fr 80px",gap:10,alignItems:"center"}}>
+                <div style={{width:32,height:32,borderRadius:"50%",flexShrink:0,
+                  background:rank<=3?`linear-gradient(135deg,${gc},${gc}99)`:"rgba(255,255,255,0.08)",
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  fontWeight:700,fontSize:rank<=3?14:11,color:rank<=3?"#000":"#999",
+                  boxShadow:rank<=3?`0 0 12px ${gc}88`:"none"}}>
                   {rank===1?"👑":rank===2?"🥈":rank===3?"🥉":`#${rank}`}
                 </div>
                 <div>
@@ -315,11 +257,11 @@ function LeaderboardView({allEntries}){
   return(
     <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28,flexWrap:"wrap"}}>
-        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,20px)",color:"#fff",margin:0}}>🏆 Ring Toss Leaderboard</h2>
+        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,20px)",color:"#fff",margin:0}}>🏆 Points Leaderboard</h2>
         <select value={week} onChange={e=>setWeek(Number(e.target.value))}
           style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,color:"#fff",padding:"7px 12px",fontFamily:"'Fira Code',monospace",fontSize:11,cursor:"pointer"}}>
           {Array.from({length:totalWeeks},(_,i)=>i+1).map(w=>(
-            <option key={w} value={w} style={{background:"#0a0a0f"}}>{getWeekLabel(w)}{w===getCurrentWeek()?" ← Current":""}</option>
+            <option key={w} value={w} style={{background:"#0a0a0f"}}>{window.getWeekLabel(w)}{w===window.getCurrentWeek()?" ← Current":""}</option>
           ))}
         </select>
       </div>
@@ -344,8 +286,8 @@ function EnterScores({allEntries,setAllEntries,setToast}){
   const [saving,setSaving]=useState(false);
   const [deleting,setDeleting]=useState(null);
   const inputOpen=isInputWindowOpen();
-  const cw=getCurrentWeek();
-  const today=todayStr();
+  const cw=window.getCurrentWeek();
+  const today=window.todayStr();
 
   const weekEntries=allEntries.filter(e=>e.week===cw);
   const grouped=groupEntries(weekEntries);
@@ -370,11 +312,11 @@ function EnterScores({allEntries,setAllEntries,setToast}){
     setErrors({});setSaving(true);
     try{
       const result=await window.fbLeaderboard.addEntry(cw,name.trim(),p,today);
-      const newEntry={id:result.id,week:cw,name:name.trim(),points:p,date:today};
+      const newEntry={id:result.id,week:cw,name:name.trim(),points:p,date:today,createdAt:Date.now()};
       setAllEntries(prev=>[...prev,newEntry]);
       setPts("");
       const rem=MAX_ATTEMPTS_PER_DAY-(attemptsToday+1);
-      setToast({msg:rem>0?`${name.trim()} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅`:`${name.trim()} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
+      setToast({msg:rem>0?`${name.trim()} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${window.SESSION_HOURS}h`:`${name.trim()} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
     } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
@@ -393,7 +335,12 @@ function EnterScores({allEntries,setAllEntries,setToast}){
   return(
     <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
       <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(14px,2vw,20px)",color:"#fff",marginBottom:6}}>📝 Enter Scores</h2>
-      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:24}}>{getWeekLabel(cw)}</p>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:8}}>{window.getWeekLabel(cw)}</p>
+      <div style={{marginBottom:24,background:"rgba(0,207,255,0.06)",border:"1px solid #00cfff33",borderRadius:8,padding:"8px 14px"}}>
+        <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#00cfff",margin:0,lineHeight:1.6}}>
+          💡 Entering a ninja here also grants them login access for the next {window.SESSION_HOURS} hours — logging in requires being entered here first.
+        </p>
+      </div>
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:24}}>
         <Glass style={{padding:22}}>
@@ -522,21 +469,19 @@ function LeaderboardsTab({allEntries,setAllEntries,setToast,isAdmin}){
 }
 
 function EntryGamesApp(){
-  const [auth,setAuth]=useState(null);
+  const {auth,ready} = window.useCnAuth();
   const [allEntries,setAllEntries]=useState([]);
   const [loading,setLoading]=useState(true);
   const [toast,setToast]=useState(null);
   const isMobile=useIsMobile();
 
   useEffect(()=>{
-    const role = localStorage.getItem("cn_role");
-    if(!role){ window.location.href="index.html"; return; }
-    setAuth({role,username:localStorage.getItem("cn_username")});
+    if(!ready) return;
     (async()=>{
       try{ setAllEntries(await window.fbLeaderboard.getAll()); }catch(e){console.warn(e);}
       setLoading(false);
     })();
-  },[]);
+  },[ready]);
 
   if(!auth||loading) return <LoadingScreen status="Loading leaderboard..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
