@@ -182,7 +182,7 @@
      // Keep the full login name (e.g. "nathan.blah") as the matched identity,
      // not just the first name, so accountKey/session/display stay correct.
      return {ok:true, matchedName: trimmed, enteredAt: mostRecent, expiresAt: mostRecent + window.SESSION_MS};
-   }
+   },
 
     // Claims a single-login "slot" for an account (admin, or a given ninja).
     // Returns {ok:false} if someone else already holds an active slot.
