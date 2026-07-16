@@ -31,22 +31,11 @@ select option{background:#0a0a0f;color:#fff;}
 </head>
 <body>
 <div id="root"></div>
+<script src="shared.js"></script>
 <script>
-const firebaseConfig = {
-  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
-  authDomain:"githubpat-2d39d.firebaseapp.com",
-  projectId:"githubpat-2d39d",
-  storageBucket:"githubpat-2d39d.firebasestorage.app",
-  messagingSenderId:"375553339098",
-  appId:"1:375553339098:web:729bb04215f50217937fe3",
-  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
 window.fbNOTM = {
   async getAll(){
-    const snap = await db.ref("notm").once("value");
+    const snap = await window.cnDb.ref("notm").once("value");
     const val = snap.val() || {};
     const entries = [];
     for(const [id,e] of Object.entries(val)){
@@ -55,23 +44,17 @@ window.fbNOTM = {
     return entries;
   },
   async addEntry(monthKey,name,points){
-    const ref = db.ref("notm").push();
+    const ref = window.cnDb.ref("notm").push();
     await ref.set({monthKey,name,points,ts:Date.now()});
     return {id:ref.key};
   },
   async deleteEntry(entryId){
-    await db.ref(`notm/${entryId}`).remove();
+    await window.cnDb.ref(`notm/${entryId}`).remove();
   }
 };
 </script>
 <script type="text/babel">
 const {useState,useEffect} = React;
-
-const WEEK_START = new Date("2026-05-14T00:00:00");
-function getCurrentWeek(){
-  const diff = new Date() - WEEK_START;
-  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
-}
 
 function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
   return(
@@ -112,15 +95,13 @@ function useIsMobile(){
   useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
   return mobile;
 }
-const NAV=[
-  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
-  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
-  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
-  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
-  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
-  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
-  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
-];
+const NAV = window.CN_NAV;
+// NOTE: this function was missing entirely in the previous version of this
+// page, which is what caused "Ninja of the Month" to show a black screen —
+// the Sidebar/MobileNav's Log Out button referenced a function that didn't
+// exist, crashing the whole page the instant it tried to render.
+function doLogout(){ window.cnSession.logout(); }
+
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
   return(
@@ -189,7 +170,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
       <div style={{marginTop:"auto",padding:"0 0 4px"}}>
         <Glass style={{padding:"11px 14px",marginBottom:8}}>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
         </Glass>
         <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
           background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
@@ -230,7 +211,7 @@ function NOTMTab({isAdmin,notmEntries,setNotmEntries,setToast}){
   const allTimeMap={};
   for(const e of notmEntries){
     if(!allTimeMap[e.name]||e.points>allTimeMap[e.name].points){
-      allTimeMap[e.name]={name:e.name,points:e.points,monthKey:e.monthKey};
+      allTimeMap[e.name]={id:e.id,name:e.name,points:e.points,monthKey:e.monthKey};
     }
   }
   const allTime=Object.values(allTimeMap).sort((a,b)=>b.points-a.points);
@@ -283,7 +264,7 @@ function NOTMTab({isAdmin,notmEntries,setNotmEntries,setToast}){
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.45)",textAlign:"center"}}>{monthShort(entry.monthKey)}</div>
           <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:"clamp(13px,1.8vw,16px)",color:rank<=3?gc:"#39ff14",textShadow:rank<=3?`0 0 10px ${gc}88`:"0 0 8px #39ff1455"}}>
             {Number(entry.points).toLocaleString()}
-            {isAdmin&&(
+            {isAdmin&&entry.id&&(
               <button onClick={()=>removeEntry(entry)} disabled={!!deleting}
                 style={{marginLeft:8,background:"rgba(255,45,120,0.12)",border:"1px solid #ff2d7833",borderRadius:5,color:"#ff2d78",padding:"1px 6px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:9,verticalAlign:"middle"}}>
                 {deleting===entry.id?<Spinner/>:"✕"}
@@ -411,16 +392,14 @@ function NOTMTab({isAdmin,notmEntries,setNotmEntries,setToast}){
 }
 
 function NOTMApp(){
-  const [auth,setAuth]=useState(null);
+  const {auth,ready} = window.useCnAuth();
   const [notmEntries,setNotmEntries]=useState([]);
   const [loading,setLoading]=useState(true);
   const [toast,setToast]=useState(null);
   const isMobile=useIsMobile();
 
   useEffect(()=>{
-    const role = localStorage.getItem("cn_role");
-    if(!role){ window.location.href="index.html"; return; }
-    setAuth({role,username:localStorage.getItem("cn_username")});
+    if(!ready) return;
     (async()=>{
       try{
         let ne=await window.fbNOTM.getAll();
@@ -438,7 +417,7 @@ function NOTMApp(){
       }catch(e){console.warn(e);}
       setLoading(false);
     })();
-  },[]);
+  },[ready]);
 
   if(!auth||loading) return <LoadingScreen status="Loading NOTM..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
