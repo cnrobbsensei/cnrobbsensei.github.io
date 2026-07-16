@@ -36,36 +36,9 @@ select option{background:#0a0a0f;color:#fff;}
 </head>
 <body>
 <div id="root"></div>
-<script>
-const firebaseConfig = {
-  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
-  authDomain:"githubpat-2d39d.firebaseapp.com",
-  projectId:"githubpat-2d39d",
-  storageBucket:"githubpat-2d39d.firebasestorage.app",
-  messagingSenderId:"375553339098",
-  appId:"1:375553339098:web:729bb04215f50217937fe3",
-  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
-window.fbUsernames = {
-  async check(username){
-    const trimmedLower = username.trim().toLowerCase();
-    if(!trimmedLower) return null;
-    const snap = await db.ref("usernames").once("value");
-    const val = snap.val() || {};
-    for(const [key,storedVal] of Object.entries(val)){
-      if(key.toLowerCase() === trimmedLower) return key;
-      if(typeof storedVal === "string" && storedVal.toLowerCase() === trimmedLower) return storedVal;
-    }
-    return null;
-  }
-};
-</script>
+<script src="shared.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
-const ADMIN_PASS = "Senseis";
 
 function Particles(){
   const ref=React.useRef();
@@ -131,6 +104,15 @@ function LoadingScreen({status}){
   );
 }
 
+// Friendly copy for every way a login attempt can fail.
+const REASON_HINTS = {
+  not_entered: "That name hasn't been entered into Points today. Ask your Sensei to add you, then log in again.",
+  expired: "Your 2-hour access window has closed. Ask your Sensei to add you to Points again to log back in.",
+  already_logged_in: "That account is already signed in somewhere else. Log out there first, or ask your Sensei for help.",
+  empty: "Enter your username or the Sensei password.",
+  error: "Couldn't reach the dojo servers. Check your connection and try again.",
+};
+
 function LoginScreen({onLogin}){
   const [pw,setPw]=useState("");
   const [show,setShow]=useState(false);
@@ -138,28 +120,45 @@ function LoginScreen({onLogin}){
   const [hint,setHint]=useState("");
   const [checking,setChecking]=useState(false);
 
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get("reason");
+    if(reason==="expired") setHint("You were signed out — your 2-hour Points access window closed.");
+    else if(reason==="logged_out_elsewhere") setHint("You were signed out because your account was logged in elsewhere.");
+  },[]);
+
   async function attempt(){
     const trimmed = pw.trim();
     if(trimmed===""){
-      setHint("Enter your username or the Sensei password.");
+      setHint(REASON_HINTS.empty);
       setShake(true);setTimeout(()=>setShake(false),500);
       return;
     }
-    if(trimmed===ADMIN_PASS){onLogin("admin",null);return;}
     setChecking(true);setHint("");
     try{
-      const matched = await window.fbUsernames.check(trimmed);
-      if(matched){
-        onLogin("student",matched);
+      if(trimmed===window.CN_ADMIN_PASS){
+        const result = await window.cnSession.loginAdmin();
+        if(result.ok){ onLogin(); return; }
+        setHint(REASON_HINTS[result.reason] || "Couldn't log in as Sensei — please try again.");
+        setShake(true);setTimeout(()=>setShake(false),500);
       } else {
-        onLogin("guest",null);
+        const result = await window.cnSession.loginStudent(trimmed);
+        if(result.ok){ onLogin(); return; }
+        setHint(REASON_HINTS[result.reason] || "Couldn't log in — please try again.");
+        setShake(true);setTimeout(()=>setShake(false),500);
       }
     } catch(e){
-      console.warn("Username check failed:",e);
-      onLogin("guest",null);
+      console.warn("Login failed:",e);
+      setHint(REASON_HINTS.error);
     }
     setChecking(false);
   }
+
+  async function continueAsGuest(){
+    await window.cnSession.loginGuest();
+    onLogin();
+  }
+
   return(
     <div style={{position:"fixed",inset:0,display:"flex",alignItems:"center",justifyContent:"center",
       background:"radial-gradient(ellipse 70% 60% at 50% 40%,rgba(57,255,20,0.07) 0%,transparent 70%),#060609",zIndex:100,padding:"16px",overflow:"auto"}}>
@@ -184,7 +183,7 @@ function LoginScreen({onLogin}){
                 onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.15)"}/>
               <button onClick={()=>setShow(!show)} style={{position:"absolute",right:11,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",cursor:"pointer",color:"rgba(255,255,255,0.4)",fontSize:15,padding:0}}>{show?"🙈":"👁️"}</button>
             </div>
-            {hint&&<p style={{color:"#ff2d78",fontSize:11,marginTop:5,fontFamily:"'Fira Code',monospace"}}>{hint}</p>}
+            {hint&&<p style={{color:"#ff2d78",fontSize:11,marginTop:5,fontFamily:"'Fira Code',monospace",lineHeight:1.5}}>{hint}</p>}
           </div>
           <button onClick={attempt} disabled={checking} style={{width:"100%",padding:"12px",borderRadius:10,border:"none",cursor:checking?"not-allowed":"pointer",
             background:checking?"rgba(255,255,255,0.1)":"linear-gradient(135deg,#39ff14,#00cfff)",color:checking?"rgba(255,255,255,0.4)":"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,letterSpacing:1.5,marginTop:16,transition:"transform .2s,opacity .2s"}}
@@ -197,13 +196,19 @@ function LoginScreen({onLogin}){
             <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.25)"}}>OR</span>
             <div style={{flex:1,height:1,background:"rgba(255,255,255,0.08)"}}/>
           </div>
-          <button onClick={()=>onLogin("guest",null)} style={{width:"100%",padding:"11px",borderRadius:10,border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.6)",fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,transition:"all .2s"}}
+          <button onClick={continueAsGuest} style={{width:"100%",padding:"11px",borderRadius:10,border:"1px solid rgba(255,255,255,0.15)",cursor:"pointer",background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.6)",fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,transition:"all .2s"}}
             onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,255,255,0.09)";e.currentTarget.style.color="#fff";}}
             onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.04)";e.currentTarget.style.color="rgba(255,255,255,0.6)";}}>
             👀 Continue as Guest (View Only)
           </button>
+          <button onClick={()=>window.location.href="tutorial.html"} style={{width:"100%",padding:"10px",borderRadius:10,border:"1px solid rgba(0,207,255,0.25)",cursor:"pointer",background:"rgba(0,207,255,0.06)",color:"#00cfff",fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,marginTop:10,transition:"all .2s"}}
+            onMouseEnter={e=>{e.currentTarget.style.background="rgba(0,207,255,0.12)";}}
+            onMouseLeave={e=>{e.currentTarget.style.background="rgba(0,207,255,0.06)";}}>
+            📘 View Tutorial (no login needed)
+          </button>
           <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.2)",textAlign:"center",marginTop:16,lineHeight:1.6}}>
-            Students: enter your username · Sensei: enter Senseis<br/>Guests can view but not interact.
+            Students: you must be entered into Points today, within the last {window.SESSION_HOURS} hours, to log in.<br/>
+            Sensei: enter the Sensei password. Only one device may be signed in per account at a time.
           </p>
         </Glass>
       </div>
@@ -214,16 +219,12 @@ function LoginScreen({onLogin}){
 function IndexApp(){
   const [checked,setChecked]=useState(false);
   useEffect(()=>{
-    const role = localStorage.getItem("cn_role");
-    if(role){ window.location.href="home.html"; }
+    const session = window.cnSession.getSession();
+    if(session && !window.cnSession.isExpired(session)){ window.location.href="home.html"; }
     else setChecked(true);
   },[]);
   if(!checked) return <LoadingScreen status="Checking session..."/>;
-  return <LoginScreen onLogin={(r,u)=>{
-    localStorage.setItem("cn_role", r);
-    if(u) localStorage.setItem("cn_username", u); else localStorage.removeItem("cn_username");
-    window.location.href="home.html";
-  }}/>;
+  return <LoginScreen onLogin={()=>{ window.location.href="home.html"; }}/>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<IndexApp/>);
