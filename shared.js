@@ -162,27 +162,27 @@
     },
 
     // Looks for a Points entry for `name` dated today, and checks it was
-   // logged within the last SESSION_HOURS. This is the gate for student login.
-   async findActivePointsEntry(loginName){
-     const trimmed = String(loginName || "").trim();
-     if(!trimmed) return {ok:false, reason:"empty"};
-     // Points entries are saved under first name only (e.g. "Nathan"),
-     // but students log in with their full username (e.g. "nathan.blah").
-     // Match on the first-name portion of whatever was typed at login.
-     const firstName = trimmed.split(".")[0].trim().toLowerCase();
-     const today = window.todayStr();
-     let all = [];
-     try{ all = await window.fbLeaderboard.getAll(); }
-     catch(e){ return {ok:false, reason:"error"}; }
-     const matches = all.filter(e => e.date === today && e.name && e.name.trim().toLowerCase() === firstName);
-     if(matches.length === 0) return {ok:false, reason:"not_entered"};
-     const mostRecent = matches.reduce((m,e)=>Math.max(m, e.createdAt || 0), 0);
-     if(!mostRecent) return {ok:false, reason:"not_entered"};
-     if(Date.now() - mostRecent > window.SESSION_MS) return {ok:false, reason:"expired"};
-     // Keep the full login name (e.g. "nathan.blah") as the matched identity,
-     // not just the first name, so accountKey/session/display stay correct.
-     return {ok:true, matchedName: trimmed, enteredAt: mostRecent, expiresAt: mostRecent + window.SESSION_MS};
-   },
+    // logged within the last SESSION_HOURS. This is the gate for student login.
+    async findActivePointsEntry(loginName){
+      const trimmed = String(loginName || "").trim();
+      if(!trimmed) return {ok:false, reason:"empty"};
+      // Points entries are saved under first name only (e.g. "Nathan"),
+      // but students log in with their full username (e.g. "nathan.blah").
+      // Match on the first-name portion of whatever was typed at login.
+      const firstName = trimmed.split(".")[0].trim().toLowerCase();
+      const today = window.todayStr();
+      let all = [];
+      try{ all = await window.fbLeaderboard.getAll(); }
+      catch(e){ return {ok:false, reason:"error"}; }
+      const matches = all.filter(e => e.date === today && e.name && e.name.trim().toLowerCase() === firstName);
+      if(matches.length === 0) return {ok:false, reason:"not_entered"};
+      const mostRecent = matches.reduce((m,e)=>Math.max(m, e.createdAt || 0), 0);
+      if(!mostRecent) return {ok:false, reason:"not_entered"};
+      if(Date.now() - mostRecent > window.SESSION_MS) return {ok:false, reason:"expired"};
+      // Keep the full login name (e.g. "nathan.blah") as the matched identity,
+      // not just the first name, so accountKey/session/display stay correct.
+      return {ok:true, matchedName: trimmed, enteredAt: mostRecent, expiresAt: mostRecent + window.SESSION_MS};
+    },
 
     // Claims a single-login "slot" for an account (admin, or a given ninja).
     // Returns {ok:false} if someone else already holds an active slot.
