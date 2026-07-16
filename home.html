@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -32,43 +31,9 @@ select option{background:#0a0a0f;color:#fff;}
 </head>
 <body>
 <div id="root"></div>
-<script>
-const firebaseConfig = {
-  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
-  authDomain:"githubpat-2d39d.firebaseapp.com",
-  projectId:"githubpat-2d39d",
-  storageBucket:"githubpat-2d39d.firebasestorage.app",
-  messagingSenderId:"375553339098",
-  appId:"1:375553339098:web:729bb04215f50217937fe3",
-  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
-window.fbLeaderboard = {
-  async getAll(){
-    const snap = await db.ref("leaderboards").once("value");
-    const val = snap.val() || {};
-    const all = [];
-    for(const weekKey of Object.keys(val)){
-      const week = parseInt(weekKey.replace("week_",""));
-      const entries = val[weekKey].entries || {};
-      for(const [id,entry] of Object.entries(entries)){
-        all.push({id,week,...entry});
-      }
-    }
-    return all;
-  }
-};
-</script>
+<script src="shared.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
-
-const WEEK_START = new Date("2026-05-14T00:00:00");
-function getCurrentWeek(){
-  const diff = new Date() - WEEK_START;
-  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
-}
 
 function groupEntries(entries){
   const map = {};
@@ -157,20 +122,8 @@ function useIsMobile(){
   return mobile;
 }
 
-const NAV=[
-  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
-  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
-  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
-  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
-  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
-  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
-  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
-];
-function doLogout(){
-  localStorage.removeItem("cn_role");
-  localStorage.removeItem("cn_username");
-  window.location.href="index.html";
-}
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
 
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
@@ -241,7 +194,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
       <div style={{marginTop:"auto",padding:"0 0 4px"}}>
         <Glass style={{padding:"11px 14px",marginBottom:8}}>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
         </Glass>
         <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
           background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
@@ -256,7 +209,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
 }
 
 function HomeTab({allEntries}){
-  const cw=getCurrentWeek();
+  const cw=window.getCurrentWeek();
   const grouped=groupEntries(allEntries);
   const weekGrouped=grouped.filter(e=>e.week===cw);
   const board=calcNinjaSummary(weekGrouped);
@@ -291,7 +244,7 @@ function HomeTab({allEntries}){
               animation:"pulse 2s ease-in-out infinite",transition:"transform .2s"}}
               onMouseEnter={e=>e.target.style.transform="scale(1.06)"}
               onMouseLeave={e=>e.target.style.transform="scale(1)"}>
-              VIEW RING TOSS →
+              VIEW POINTS →
             </button>
           </div>
           <div style={{animation:"fadeSlideRight .7s ease both"}}>
@@ -316,20 +269,18 @@ function HomeTab({allEntries}){
 }
 
 function HomeApp(){
-  const [auth,setAuth]=useState(null);
+  const {auth,ready} = window.useCnAuth();
   const [allEntries,setAllEntries]=useState([]);
   const [loading,setLoading]=useState(true);
   const isMobile=useIsMobile();
 
   useEffect(()=>{
-    const role = localStorage.getItem("cn_role");
-    if(!role){ window.location.href="index.html"; return; }
-    setAuth({role,username:localStorage.getItem("cn_username")});
+    if(!ready) return;
     (async()=>{
       try{ setAllEntries(await window.fbLeaderboard.getAll()); }catch(e){console.warn(e);}
       setLoading(false);
     })();
-  },[]);
+  },[ready]);
 
   if(!auth||loading) return <LoadingScreen status="Loading dashboard..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
