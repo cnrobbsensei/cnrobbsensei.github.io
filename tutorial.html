@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Code Ninjas – Tutorial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#060609;color:#fff;}
+#root{min-height:100vh;display:flex;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+select option{background:#0a0a0f;color:#fff;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@media(max-width:768px){#root{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="shared.js"></script>
+<script type="text/babel">
+const {useState,useEffect} = React;
+
+function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
+  return(
+    <div onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
+      background:"rgba(255,255,255,0.06)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
+      border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",...style
+    }}>{children}</div>
+  );
+}
+function LoadingScreen({status}){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:36,height:36,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
+    </div>
+  );
+}
+function useIsMobile(){
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return mobile;
+}
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
+
+function MobileNav({active,isAdmin,isStudent,studentUsername}){
+  const [open,setOpen]=useState(false);
+  return(
+    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{padding:"3px 8px",borderRadius:99,
+            background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+            border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,
+            color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
+          </div>
+          <button onClick={()=>setOpen(!open)} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",padding:"6px 10px",cursor:"pointer",fontSize:16}}>{open?"✕":"☰"}</button>
+        </div>
+      </div>
+      {open&&(
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+          {NAV.map(item=>(
+            <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+              display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
+              background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
+              color:active===item.id?"#fff":"rgba(255,255,255,0.6)"}}>
+              <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+            </button>
+          ))}
+          <button onClick={doLogout} style={{padding:"9px 14px",borderRadius:10,border:"1px solid rgba(255,45,120,0.3)",background:"rgba(255,45,120,0.08)",color:"#ff2d78",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1}}>← LOG OUT</button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Sidebar({active,isAdmin,isStudent,studentUsername}){
+  return(
+    <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",padding:"22px 14px",gap:6,
+      background:"rgba(0,0,0,0.35)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
+      borderRight:"1px solid rgba(255,255,255,0.06)",zIndex:10,position:"sticky",top:0}}>
+      <div style={{padding:"10px 10px 20px",textAlign:"center"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
+        <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+          background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+          border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
+          <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",letterSpacing:1,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"ADMIN":isStudent?studentUsername:"GUEST"}
+          </span>
+        </div>
+      </div>
+      {NAV.map(item=>(
+        <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+          display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
+          fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
+          background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
+          color:active===item.id?"#fff":"rgba(255,255,255,0.4)",
+          boxShadow:active===item.id?"inset 0 0 0 1px rgba(57,255,20,0.3),0 0 16px rgba(57,255,20,0.1)":"none"}}
+          onMouseEnter={e=>{if(active!==item.id){e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="#fff";}}}
+          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
+          <span style={{fontSize:17}}>{item.icon}</span>{item.label}
+        </button>
+      ))}
+      <div style={{marginTop:"auto",padding:"0 0 4px"}}>
+        <Glass style={{padding:"11px 14px",marginBottom:8}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
+        </Glass>
+        <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
+          background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
+          fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1,transition:"all .2s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,45,120,0.1)";e.currentTarget.style.borderColor="#ff2d7844";e.currentTarget.style.color="#ff2d78";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.03)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";e.currentTarget.style.color="rgba(255,255,255,0.35)";}}>
+          ← LOG OUT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Simplified header shown when NOT logged in — tutorial is accessible any
+// time, with or without an active session.
+// -------------------------------------------------------------------------
+function GuestHeader(){
+  return(
+    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",
+      borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+      <div>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:12,color:"#39ff14",letterSpacing:1}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE · TUTORIAL</div>
+      </div>
+      <button onClick={()=>window.location.href="index.html"} style={{padding:"9px 18px",borderRadius:10,border:"1px solid rgba(57,255,20,0.3)",
+        background:"rgba(57,255,20,0.08)",color:"#39ff14",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontWeight:600,fontSize:11,letterSpacing:1}}>
+        ← BACK TO LOGIN
+      </button>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Tutorial content
+// -------------------------------------------------------------------------
+function Step({num,title,color,children}){
+  return(
+    <Glass style={{padding:"18px 20px",display:"flex",gap:16,animation:"fadeUp .4s ease both"}}>
+      <div style={{flexShrink:0,width:34,height:34,borderRadius:10,background:`${color}18`,border:`1px solid ${color}44`,
+        display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:14,color}}>
+        {num}
+      </div>
+      <div style={{flex:1}}>
+        <h4 style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,color:"#fff",marginBottom:6,letterSpacing:.5}}>{title}</h4>
+        <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.6)",lineHeight:1.65}}>{children}</div>
+      </div>
+    </Glass>
+  );
+}
+
+function NinjaTutorial(){
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <Step num="1" title="Logging in" color="#ffd700">
+        Ask your Sensei to enter you into <b style={{color:"#ffd700"}}>Points</b> (used to be called "Ring Toss") for the day.
+        Once that's done, go to the login screen and type your <b>username</b> (like <code style={{color:"#00cfff"}}>nathan.blah</code>) — no password needed as a ninja.
+      </Step>
+      <Step num="2" title="Your 2-hour access window" color="#ffd700">
+        You can only log in if you've been entered into Points <b>today</b>, and only for <b>2 hours</b> after that entry.
+        After 2 hours (or after closing your tab), you'll be signed out automatically — just ask your Sensei to enter you again if you need more time.
+      </Step>
+      <Step num="3" title="One device at a time" color="#ffd700">
+        Only one device can be logged into your account at once. If you try to log in somewhere else while already signed in, it will be blocked —
+        make sure to log out on your old device first.
+      </Step>
+      <Step num="4" title="🏆 Points" color="#39ff14">
+        See the weekly leaderboard, ranked by points earned each day. Your Sensei adds your daily score — check back to see how you and your friends rank!
+      </Step>
+      <Step num="5" title="🧩 Riddle of the Week" color="#39ff14">
+        Submit your best guess to the weekly riddle. Your Sensei will lock in a winner once the week ends — sometimes nobody gets it right, and that's okay too!
+      </Step>
+      <Step num="6" title="⭐ Ninja of the Month" color="#39ff14">
+        A monthly hall of fame showing the top-scoring ninja each month, plus an all-time "best month ever" leaderboard.
+      </Step>
+      <Step num="7" title="📊 Polls" color="#39ff14">
+        Vote in polls your Sensei creates. Your voice helps decide dojo activities, game nights, and more!
+      </Step>
+      <Step num="8" title="📍 In The Dojo" color="#39ff14">
+        See which ninjas are currently checked in (i.e. have an active 2-hour Points window right now) — a live view of who's in the dojo.
+      </Step>
+      <Step num="9" title="🎮 Games" color="#39ff14">
+        Games unlock only when your Sensei starts your break time from "In The Dojo." Once it's on, enjoy Memory Match or Dino Runner until your break ends!
+      </Step>
+      <Step num="10" title="💬 Ninja Chat" color="#39ff14">
+        Chat with other ninjas in a friendly, moderated space. Inappropriate language is automatically blocked, and Senseis can remove any message.
+        Guests can read chat but can't send messages.
+      </Step>
+    </div>
+  );
+}
+
+function AdminTutorial(){
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <Step num="1" title="Logging in as Sensei" color="#39ff14">
+        On the login screen, enter the shared <b style={{color:"#39ff14"}}>Sensei password</b> instead of a username. Only one Sensei device can be
+        logged in on the shared admin account at a time.
+      </Step>
+      <Step num="2" title="Adding ninjas to Points" color="#39ff14">
+        Go to <b>Points</b> and use "+ Add Entry" to log a ninja's first name and their score for today. This is also what unlocks that ninja's
+        2-hour login window — a ninja can't sign in until they've been added for the day.
+      </Step>
+      <Step num="3" title="Managing the Riddle" color="#39ff14">
+        Set the weekly riddle text and answer, review submissions, and lock in a winner. If nobody solves it, choose the
+        <b> "No One"</b> option instead of picking a name — this locks the week without crediting anyone.
+      </Step>
+      <Step num="4" title="Ninja of the Month" color="#39ff14">
+        Add or remove monthly point totals per ninja. The highest score each month wins that month, and the all-time "Hall of Fame" tracks each
+        ninja's best month ever.
+      </Step>
+      <Step num="5" title="Polls" color="#39ff14">
+        Create new polls, watch votes roll in live, and archive or delete old polls once they're no longer needed.
+      </Step>
+      <Step num="6" title="In The Dojo & Break Time" color="#39ff14">
+        See every ninja currently within their 2-hour window. From here, start or end a ninja's break — starting a break is what unlocks
+        the Games tab for that student, for up to 10 minutes.
+      </Step>
+      <Step num="7" title="Moderating Ninja Chat" color="#39ff14">
+        As Sensei, you can delete any message in Ninja Chat by hovering over it and clicking "✕ delete." The filter blocks most inappropriate
+        language automatically, but you're always the final backstop.
+      </Step>
+      <Step num="8" title="Session rules apply to you too" color="#39ff14">
+        Closing your tab signs you out immediately, and only one Sensei session can be active at a time — if you need to switch devices, log out
+        first on the old one.
+      </Step>
+    </div>
+  );
+}
+
+function TutorialTab({defaultTab}){
+  const [tab,setTab]=useState(defaultTab||"ninja");
+  return(
+    <div style={{minHeight:"100vh",padding:"clamp(20px,4vw,40px)",maxWidth:820,margin:"0 auto",width:"100%"}}>
+      <div style={{marginBottom:24,animation:"fadeUp .5s ease both"}}>
+        <div style={{display:"inline-block",background:"rgba(0,207,255,0.1)",border:"1px solid #00cfff44",borderRadius:99,padding:"5px 14px",marginBottom:12}}>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#00cfff",letterSpacing:1.5}}>📘 GUIDE</span>
+        </div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(20px,3vw,30px)",fontWeight:900,marginBottom:8}}>How to use the Dojo Dashboard</h1>
+        <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.5)",lineHeight:1.6}}>
+          New here? This tutorial walks through everything, step by step. It's always available — no login required.
+        </p>
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:22}}>
+        <button onClick={()=>setTab("ninja")} style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
+          fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,
+          background:tab==="ninja"?"linear-gradient(135deg,#ffd700,#ff8c00)":"rgba(255,255,255,0.06)",
+          color:tab==="ninja"?"#000":"rgba(255,255,255,0.5)"}}>
+          🥷 FOR NINJAS
+        </button>
+        <button onClick={()=>setTab("admin")} style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
+          fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,
+          background:tab==="admin"?"linear-gradient(135deg,#39ff14,#00cfff)":"rgba(255,255,255,0.06)",
+          color:tab==="admin"?"#000":"rgba(255,255,255,0.5)"}}>
+          🔐 FOR SENSEIS
+        </button>
+      </div>
+
+      {tab==="ninja" ? <NinjaTutorial/> : <AdminTutorial/>}
+
+      <div style={{marginTop:28,textAlign:"center"}}>
+        <button onClick={()=>window.location.href="home.html"} style={{padding:"11px 26px",borderRadius:10,border:"1px solid rgba(57,255,20,0.3)",
+          background:"rgba(57,255,20,0.08)",color:"#39ff14",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontWeight:600,fontSize:11,letterSpacing:1}}>
+          ← Back to Dashboard
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TutorialApp(){
+  const [checked,setChecked]=useState(false);
+  const [session,setSession]=useState(null);
+  const isMobile=useIsMobile();
+
+  useEffect(()=>{
+    // Tutorial works with or without a session — never redirects.
+    const s = window.cnSession.getSession();
+    if(s && !window.cnSession.isExpired(s)){
+      window.cnSession.resumeHeartbeat();
+      setSession(s);
+    }
+    setChecked(true);
+  },[]);
+
+  if(!checked) return <LoadingScreen status="Loading tutorial..."/>;
+
+  const loggedIn = !!session;
+  const isAdmin = loggedIn && session.role==="admin";
+  const isStudent = loggedIn && session.role==="student";
+  const defaultTab = isAdmin ? "admin" : "ninja";
+
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",minHeight:"100vh",position:"relative",zIndex:1,width:"100%"}}>
+        {loggedIn ? (
+          isMobile
+            ?<MobileNav active="tutorial" isAdmin={isAdmin} isStudent={isStudent} studentUsername={session.username}/>
+            :<Sidebar active="tutorial" isAdmin={isAdmin} isStudent={isStudent} studentUsername={session.username}/>
+        ) : null}
+        <div style={{flex:1,overflowY:"auto",...(isMobile||!loggedIn?{}:{height:"100vh"})}}>
+          {!loggedIn && <GuestHeader/>}
+          <TutorialTab defaultTab={defaultTab}/>
+        </div>
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<TutorialApp/>);
+</script>
+</body>
+</html>
