@@ -27,80 +27,11 @@ html,body{height:100%;background:#060609;color:#fff;}
 </head>
 <body>
 <div id="root"></div>
-<script>
-const firebaseConfig = {
-  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
-  authDomain:"githubpat-2d39d.firebaseapp.com",
-  projectId:"githubpat-2d39d",
-  storageBucket:"githubpat-2d39d.firebasestorage.app",
-  messagingSenderId:"375553339098",
-  appId:"1:375553339098:web:729bb04215f50217937fe3",
-  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
-window.fbLeaderboard = {
-  async getAll(){
-    const snap = await db.ref("leaderboards").once("value");
-    const val = snap.val() || {};
-    const all = [];
-    for(const weekKey of Object.keys(val)){
-      const week = parseInt(weekKey.replace("week_",""));
-      const entries = val[weekKey].entries || {};
-      for(const [id,entry] of Object.entries(entries)){
-        all.push({id,week,...entry});
-      }
-    }
-    return all;
-  }
-};
-
-// Cross-referencing helper: turns a username like "adam.dodo" into a Firebase-safe key
-// (Realtime Database keys can't contain '.', '#', '$', '[', ']')
-window.cnKeySafe = function(str){
-  return String(str).trim().toLowerCase().replace(/[.#$\[\]]/g,"_");
-};
-
-window.fbUsernames = {
-  // Returns the full list of registered usernames (e.g. "adam.dodo") so we can
-  // cross-reference them against the first names logged in Ring Toss.
-  async getAll(){
-    const snap = await db.ref("usernames").once("value");
-    const val = snap.val() || {};
-    const list = [];
-    for(const [key,storedVal] of Object.entries(val)){
-      if(typeof storedVal === "string") list.push(storedVal);
-      else if(typeof key === "string" && key.includes(".")) list.push(key);
-    }
-    return [...new Set(list)];
-  }
-};
-
-// Breaks auto-expire after this many milliseconds (10 minutes).
-window.BREAK_DURATION_MS = 10*60*1000;
-window.cnIsBreakActive = function(entry){
-  return !!(entry && entry.startedAt && (Date.now()-entry.startedAt < window.BREAK_DURATION_MS));
-};
-
-window.fbBreak = {
-  // Per-student "on break" flags, keyed by a sanitized version of their username.
-  async getAll(){
-    const snap = await db.ref("games/onBreak").once("value");
-    return snap.val() || {};
-  },
-  async setBreak(usernameKey, on){
-    if(on){ await db.ref(`games/onBreak/${usernameKey}`).set({startedAt: Date.now()}); }
-    else{ await db.ref(`games/onBreak/${usernameKey}`).remove(); }
-  }
-};
-</script>
+<script src="shared.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
 
-const ADMIN_PASS = "Senseis"; // same Sensei password used on the sign-in screen
-
-// Matches a Ring Toss first name (e.g. "Adam") to a registered username
+// Matches a Points first name (e.g. "Adam") to a registered username
 // (e.g. "adam.dodo") by comparing first names only.
 function findLinkedAccount(firstName, usernames){
   const target = String(firstName).trim().toLowerCase();
@@ -125,15 +56,6 @@ function cleanExpiredBreaks(breaks){
   return cleaned;
 }
 
-const WEEK_START = new Date("2026-05-14T00:00:00");
-function getCurrentWeek(){
-  const diff = new Date() - WEEK_START;
-  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
-}
-function todayStr(){
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-}
 function todayLabel(){
   return new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"});
 }
@@ -161,16 +83,8 @@ function useIsMobile(){
   useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
   return mobile;
 }
-const NAV=[
-  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
-  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
-  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
-  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
-  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
-  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
-  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
-];
-function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
 
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
@@ -240,7 +154,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
       <div style={{marginTop:"auto",padding:"0 0 4px"}}>
         <Glass style={{padding:"11px 14px",marginBottom:8}}>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
         </Glass>
         <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
           background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
@@ -255,7 +169,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
 }
 
 function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshing,onBreakChanged}){
-  const today = todayStr();
+  const today = window.todayStr();
   const todayEntries = allEntries.filter(e=>e.date===today);
   const [togglingAccount,setTogglingAccount]=useState(null);
   const [nowTick,setNowTick]=useState(Date.now());
@@ -265,23 +179,30 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
     return ()=>clearInterval(iv);
   },[]);
 
-  // Group by ninja name -> total points today, attempt count, most-recent ts (we don't have ts on
-  // leaderboard entries, so we just use insertion order as a proxy for "most recently active")
+  // Group by ninja name -> total points today, attempt count, and the most
+  // recent createdAt timestamp. A ninja only shows as "checked in" here while
+  // that timestamp is within the last SESSION_HOURS — this mirrors the exact
+  // window that controls whether their login still works, so "In The Dojo"
+  // always reflects who can currently sign in.
   const map = {};
-  const order = [];
-  todayEntries.forEach((e,i)=>{
+  todayEntries.forEach(e=>{
     const key = e.name.trim();
-    if(!map[key]){ map[key]={name:key,points:0,attempts:0,firstSeenIdx:i}; order.push(key); }
+    if(!map[key]) map[key]={name:key,points:0,attempts:0,lastSeen:0};
     map[key].points += e.points;
     map[key].attempts += 1;
+    map[key].lastSeen = Math.max(map[key].lastSeen, e.createdAt||0);
   });
-  const present = Object.values(map).sort((a,b)=>b.firstSeenIdx-a.firstSeenIdx);
+  const allToday = Object.values(map);
+  const present = allToday
+    .filter(p => p.lastSeen && (nowTick - p.lastSeen <= window.SESSION_MS))
+    .sort((a,b)=>b.lastSeen-a.lastSeen);
+  const expiredCount = allToday.length - present.length;
 
   async function handleBreakToggle(account, currentlyOn){
     if(!account || togglingAccount) return;
     const pw = window.prompt(`Enter Sensei password to ${currentlyOn?"end":"start"} break for ${account}:`);
     if(pw===null) return;
-    if(pw!==ADMIN_PASS){ alert("Incorrect password."); return; }
+    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
     setTogglingAccount(account);
     try{
       await window.fbBreak.setBreak(window.cnKeySafe(account), !currentlyOn);
@@ -310,7 +231,8 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
         </button>
       </div>
       <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:24}}>
-        {todayLabel()} · Based on Ring Toss score entries logged today
+        {todayLabel()} · Ninjas with a Points entry logged in the last {window.SESSION_HOURS} hours
+        {expiredCount>0?` · ${expiredCount} more checked in earlier today but their ${window.SESSION_HOURS}h window has closed`:""}
       </p>
 
       <Glass style={{padding:"16px 20px",marginBottom:24,borderColor:"#00cfff33",background:"rgba(0,207,255,0.05)"}}>
@@ -318,7 +240,7 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
           <div style={{fontSize:30}}>🥷</div>
           <div>
             <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:20,color:"#00cfff"}}>{present.length}</div>
-            <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)"}}>ninja{present.length!==1?"s":""} checked in today</div>
+            <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)"}}>ninja{present.length!==1?"s":""} currently in the dojo</div>
           </div>
         </div>
       </Glass>
@@ -326,7 +248,7 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
       {present.length===0?(
         <Glass style={{padding:40,textAlign:"center"}}>
           <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>
-            No score entries yet today. Once ninjas play Ring Toss, they'll show up here! 🥷
+            No ninjas currently checked in. Once a Sensei enters someone into Points, they'll show up here for {window.SESSION_HOURS} hours! 🥷
           </p>
         </Glass>
       ):(
@@ -336,6 +258,8 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
             const breakEntry = account ? breakStatuses[window.cnKeySafe(account)] : null;
             const onBreak = window.cnIsBreakActive(breakEntry);
             const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.BREAK_DURATION_MS-nowTick)/60000)) : 0;
+            const accessRemainingMs = Math.max(0,(p.lastSeen+window.SESSION_MS)-nowTick);
+            const accessRemainingMin = Math.ceil(accessRemainingMs/60000);
             return(
               <Glass key={p.name} style={{padding:"16px 18px",borderColor:"rgba(57,255,20,0.2)",
                 animation:`fadeUp .35s ease both ${i*.04}s`}}>
@@ -357,9 +281,12 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
                     )}
                   </div>
                 </div>
-                <div style={{display:"flex",justifyContent:"space-between",fontFamily:"'Fira Code',monospace",fontSize:10,marginBottom:isAdmin?12:0}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontFamily:"'Fira Code',monospace",fontSize:10,marginBottom:6}}>
                   <span style={{color:"rgba(255,255,255,0.35)"}}>{p.attempts} attempt{p.attempts!==1?"s":""} today</span>
                   <span style={{color:"#39ff14",fontWeight:700}}>{p.points.toLocaleString()} pts</span>
+                </div>
+                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:accessRemainingMin<=15?"#ff2d78":"rgba(255,255,255,0.3)",marginBottom:isAdmin?12:0}}>
+                  🔑 login access: {accessRemainingMin}m left
                 </div>
                 {isAdmin&&(
                   <button onClick={()=>handleBreakToggle(account,onBreak)}
@@ -382,7 +309,7 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
 }
 
 function NITDApp(){
-  const [auth,setAuth]=useState(null);
+  const {auth,ready} = window.useCnAuth();
   const [allEntries,setAllEntries]=useState([]);
   const [usernames,setUsernames]=useState([]);
   const [breakStatuses,setBreakStatuses]=useState({});
@@ -410,11 +337,9 @@ function NITDApp(){
   }
 
   useEffect(()=>{
-    const role = localStorage.getItem("cn_role");
-    if(!role){ window.location.href="index.html"; return; }
-    setAuth({role,username:localStorage.getItem("cn_username")});
+    if(!ready) return;
     (async()=>{ await load(false); setLoading(false); })();
-  },[]);
+  },[ready]);
 
   useEffect(()=>{
     if(!auth) return;
