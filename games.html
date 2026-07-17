@@ -26,69 +26,42 @@ input::placeholder{color:rgba(255,255,255,0.2);}
 @keyframes cardPop{0%{transform:scale(1)}50%{transform:scale(1.08)}100%{transform:scale(1)}}
 @keyframes heartLose{0%{transform:scale(1.3)}100%{transform:scale(1)}}
 @keyframes shakeCard{0%,100%{transform:translateX(0)}20%{transform:translateX(-4px)}40%{transform:translateX(4px)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+@keyframes floatSlow{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
 @media(max-width:768px){#root{flex-direction:column;}}
 </style>
 </head>
 <body>
 <div id="root"></div>
+<script src="shared.js"></script>
 <script>
-const firebaseConfig = {
-  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
-  authDomain:"githubpat-2d39d.firebaseapp.com",
-  projectId:"githubpat-2d39d",
-  storageBucket:"githubpat-2d39d.firebasestorage.app",
-  messagingSenderId:"375553339098",
-  appId:"1:375553339098:web:729bb04215f50217937fe3",
-  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
-// Cross-referencing helper: turns a username like "adam.dodo" into a Firebase-safe key
-// (Realtime Database keys can't contain '.', '#', '$', '[', ']'). Must match nitd.html exactly.
-window.cnKeySafe = function(str){
-  return String(str).trim().toLowerCase().replace(/[.#$\[\]]/g,"_");
-};
-
-// Breaks auto-expire after this many milliseconds (10 minutes). Must match nitd.html exactly.
-window.BREAK_DURATION_MS = 10*60*1000;
-window.cnIsBreakActive = function(entry){
-  return !!(entry && entry.startedAt && (Date.now()-entry.startedAt < window.BREAK_DURATION_MS));
-};
-
+// Games-specific Firebase helpers (per-game leaderboards). Break flags and
+// the cnKeySafe/cnIsBreakActive helpers now live in shared.js.
 window.fbGames = {
-  async getSettings(){
-    const snap = await db.ref("games/settings").once("value");
-    return snap.val() || {breakMode:false};
-  },
-  async setBreakMode(v){
-    await db.ref("games/settings").update({breakMode:v});
-  },
   // Live-watches this student's break flag (set from the "Start Break" button on the
   // In The Dojo page) and fires the callback immediately whenever it changes, so a
   // Sensei ending a break instantly kicks the student out of whatever game they're in.
   watchStudentBreak(username, callback){
     if(!username) return ()=>{};
-    const ref = db.ref(`games/onBreak/${window.cnKeySafe(username)}`);
+    const ref = window.cnDb.ref(`games/onBreak/${window.cnKeySafe(username)}`);
     const handler = snap => callback(snap.val());
     ref.on("value", handler);
     return ()=> ref.off("value", handler);
   },
   async getLeaderboard(gameId){
-    const snap = await db.ref(`games/${gameId}/leaderboard`).once("value");
+    const snap = await window.cnDb.ref(`games/${gameId}/leaderboard`).once("value");
     const val = snap.val() || {};
     return Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score).slice(0,5);
   },
   async submitScore(gameId,name,score){
-    const ref = db.ref(`games/${gameId}/leaderboard`).push();
+    const ref = window.cnDb.ref(`games/${gameId}/leaderboard`).push();
     const ts = Date.now();
     await ref.set({name,score,ts});
-    const snap = await db.ref(`games/${gameId}/leaderboard`).once("value");
+    const snap = await window.cnDb.ref(`games/${gameId}/leaderboard`).once("value");
     const val = snap.val() || {};
     const entries = Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score);
     if(entries.length>5){
       const toDelete = entries.slice(5);
-      await Promise.all(toDelete.map(e=>db.ref(`games/${gameId}/leaderboard/${e.id}`).remove()));
+      await Promise.all(toDelete.map(e=>window.cnDb.ref(`games/${gameId}/leaderboard/${e.id}`).remove()));
     }
     const top5 = entries.slice(0,5);
     const madeIt = top5.some(e=>e.ts===ts && e.name===name && e.score===score);
@@ -98,12 +71,6 @@ window.fbGames = {
 </script>
 <script type="text/babel">
 const {useState,useEffect,useRef} = React;
-
-const WEEK_START = new Date("2026-05-14T00:00:00");
-function getCurrentWeek(){
-  const diff = new Date() - WEEK_START;
-  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
-}
 
 function Glass({children,style={},onClick}){
   return(
@@ -135,16 +102,8 @@ function useIsMobile(){
   useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
   return mobile;
 }
-const NAV=[
-  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
-  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
-  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
-  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
-  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
-  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
-  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
-];
-function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
 
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
@@ -214,7 +173,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
       <div style={{marginTop:"auto",padding:"0 0 4px"}}>
         <Glass style={{padding:"11px 14px",marginBottom:8}}>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
         </Glass>
         <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
           background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
@@ -518,8 +477,7 @@ function DinoGame({defaultName,onExit}){
       if(st.running){
         st.velY += GRAVITY*dt;
         st.dinoY += st.velY*dt;
-        if(st.dinoY > GROUND_Y-DINO_SIZE){ st.dinoY=GROUND_Y-DINO_SIZE; st.velY=0; }
-
+        if(st.dinoY > GROUND_Y-DINO_SIZE){ st.dinoY = GROUND_Y-DINO_SIZE; st.velY = 0; }
         st.distance += st.speed*dt;
         st.speed = 220 + Math.min(260, st.distance*0.02);
 
@@ -668,247 +626,6 @@ function DinoGame({defaultName,onExit}){
   );
 }
 
-// ── Run game (endless space-tunnel gap-jumper, in the spirit of the classic "Run" series) ──
-function RunGame({defaultName,onExit}){
-  const canvasRef = useRef(null);
-  const rafRef = useRef(null);
-  const starsRef = useRef(Array.from({length:40},()=>({x:Math.random()*360,y:Math.random()*130,r:Math.random()*1.4+0.3})));
-  const stateRef = useRef({y:0,velY:0,onGround:true,gaps:[],speed:230,distance:0,gapTimer:0,running:true});
-  const [score,setScore]=useState(0);
-  const [gameOver,setGameOver]=useState(false);
-  const [name,setName]=useState(defaultName||"");
-  const [submitting,setSubmitting]=useState(false);
-  const [submitted,setSubmitted]=useState(false);
-  const [madeIt,setMadeIt]=useState(false);
-  const [leaderboard,setLeaderboard]=useState(null);
-
-  const W=360,H=180;
-  const GROUND_Y=H-40;
-  const PLAYER_SIZE=22;
-  const PLAYER_X=44;
-  const GRAVITY=2000;
-  const JUMP_V=-640;
-  const VOID_Y=H;
-
-  function reset(){
-    stateRef.current={y:GROUND_Y-PLAYER_SIZE,velY:0,onGround:true,gaps:[],speed:230,distance:0,gapTimer:1.1,running:true};
-    setScore(0);setGameOver(false);setSubmitted(false);setMadeIt(false);setLeaderboard(null);
-  }
-
-  function jump(){
-    const st=stateRef.current;
-    if(!st.running) return;
-    if(st.onGround){
-      st.velY = JUMP_V;
-      st.onGround = false;
-    }
-  }
-
-  function isOverGap(x, gaps){
-    for(const g of gaps){ if(x >= g.x && x <= g.x+g.w) return true; }
-    return false;
-  }
-
-  useEffect(()=>{
-    reset();
-    let last = performance.now();
-    let acc = 0;
-    function draw(){
-      const canvas=canvasRef.current; if(!canvas) return;
-      const ctx=canvas.getContext("2d");
-      ctx.fillStyle="#04040a";
-      ctx.fillRect(0,0,W,H);
-      ctx.fillStyle="rgba(255,255,255,0.5)";
-      starsRef.current.forEach(s=>{ ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); });
-
-      const st=stateRef.current;
-      const tileTop = GROUND_Y+PLAYER_SIZE;
-      let cursor = 0;
-      const sortedGaps=[...st.gaps].sort((a,b)=>a.x-b.x);
-      sortedGaps.forEach(g=>{
-        if(g.x>cursor){
-          ctx.fillStyle="rgba(0,207,255,0.18)";
-          ctx.fillRect(cursor,tileTop,g.x-cursor,H-tileTop);
-          ctx.strokeStyle="#00cfff88";
-          ctx.beginPath();ctx.moveTo(cursor,tileTop);ctx.lineTo(g.x,tileTop);ctx.stroke();
-        }
-        ctx.fillStyle="rgba(255,45,120,0.10)";
-        ctx.fillRect(g.x,tileTop,g.w,H-tileTop);
-        cursor = g.x+g.w;
-      });
-      if(cursor<W){
-        ctx.fillStyle="rgba(0,207,255,0.18)";
-        ctx.fillRect(cursor,tileTop,W-cursor,H-tileTop);
-        ctx.strokeStyle="#00cfff88";
-        ctx.beginPath();ctx.moveTo(cursor,tileTop);ctx.lineTo(W,tileTop);ctx.stroke();
-      }
-
-      ctx.fillStyle="#39ff14";
-      ctx.shadowColor="#39ff14";ctx.shadowBlur=10;
-      ctx.fillRect(PLAYER_X, st.y, PLAYER_SIZE, PLAYER_SIZE);
-      ctx.shadowBlur=0;
-    }
-    function loop(now){
-      const dt=Math.min(0.033,(now-last)/1000);
-      last=now;
-      const st=stateRef.current;
-      if(st.running){
-        st.velY += GRAVITY*dt;
-        st.y += st.velY*dt;
-        if(st.y >= GROUND_Y-PLAYER_SIZE){
-          st.y = GROUND_Y-PLAYER_SIZE;
-          st.velY = 0;
-          st.onGround = true;
-        }
-
-        st.distance += st.speed*dt;
-        st.speed = 230 + Math.min(280, st.distance*0.02);
-
-        st.gapTimer -= dt;
-        if(st.gapTimer<=0){
-          const maxW = Math.min(70, 34+st.distance*0.015);
-          const w = 26 + Math.random()*(maxW-26);
-          st.gaps.push({x:W, w});
-          st.gapTimer = Math.max(0.75, 1.5 - Math.min(0.6, st.distance*0.00006) + Math.random()*0.7);
-        }
-        st.gaps.forEach(g=>{ g.x -= st.speed*dt; });
-        st.gaps = st.gaps.filter(g=>g.x+g.w>-5);
-
-        const footX = PLAYER_X + PLAYER_SIZE/2;
-        if(st.onGround && isOverGap(footX, st.gaps)){
-          st.onGround = false;
-        }
-        if(st.y > VOID_Y){
-          st.running = false;
-          setGameOver(true);
-        }
-        acc+=dt;
-        if(acc>0.1){ acc=0; setScore(Math.floor(st.distance/5)); }
-      }
-      draw();
-      rafRef.current = requestAnimationFrame(loop);
-    }
-    rafRef.current = requestAnimationFrame(loop);
-    return ()=>cancelAnimationFrame(rafRef.current);
-  },[]);
-
-  useEffect(()=>{
-    function onKey(e){ if(e.code==="Space"||e.code==="ArrowUp"){ e.preventDefault(); jump(); } }
-    window.addEventListener("keydown",onKey);
-    return ()=>window.removeEventListener("keydown",onKey);
-  },[]);
-
-  useEffect(()=>{
-    if(gameOver){
-      window.fbGames.getLeaderboard("run").then(setLeaderboard).catch(()=>setLeaderboard([]));
-    }
-  },[gameOver]);
-
-  async function saveScore(){
-    if(!name.trim()||submitting||submitted) return;
-    setSubmitting(true);
-    try{
-      const {top5,madeIt:mi} = await window.fbGames.submitScore("run",name.trim(),score);
-      setLeaderboard(top5);
-      setMadeIt(mi);
-      setSubmitted(true);
-    } catch(e){ console.warn(e); }
-    setSubmitting(false);
-  }
-
-  function playAgain(){ reset(); }
-
-  return(
-    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
-      {!gameOver?(
-        <>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.4)"}}>TAP / CLICK / SPACE TO JUMP</span>
-            <span style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"#39ff14"}}>SCORE <b>{score}</b></span>
-          </div>
-          <div onClick={jump} onTouchStart={e=>{e.preventDefault();jump();}}
-            style={{borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.15)",
-              background:"rgba(255,255,255,0.03)",cursor:"pointer",touchAction:"none"}}>
-            <canvas ref={canvasRef} width={W} height={H} style={{display:"block",width:"100%",height:"auto"}}/>
-          </div>
-          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:10}}>
-            The tunnel floor keeps breaking apart — jump the gaps or fall into the void. Never stops, only speeds up!
-          </p>
-        </>
-      ):(
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:6,overflowY:"auto"}}>
-          <div style={{fontSize:40,marginBottom:4}}>🕳️💥</div>
-          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,color:"#ff2d78"}}>GAME OVER</h3>
-          <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:10}}>
-            Final Score: <b style={{color:"#39ff14"}}>{score}</b>
-          </p>
-
-          {!submitted?(
-            <div style={{width:"100%",maxWidth:280,marginBottom:18}}>
-              <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:6,letterSpacing:1}}>SAVE YOUR SCORE</label>
-              <div style={{display:"flex",gap:8}}>
-                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={iStyle(false)}/>
-                <button onClick={saveScore} disabled={!name.trim()||submitting}
-                  style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
-                    cursor:!name.trim()||submitting?"not-allowed":"pointer",
-                    background:!name.trim()||submitting?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
-                    color:!name.trim()||submitting?"rgba(255,255,255,0.3)":"#000",
-                    fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
-                  {submitting?<Spinner/>:"SAVE"}
-                </button>
-              </div>
-            </div>
-          ):(
-            <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:madeIt?"#ffd700":"#39ff14",marginBottom:14}}>
-              {madeIt?"🏆 New Top 5 Leaderboard Entry!":"✅ Score submitted!"}
-            </p>
-          )}
-
-          <div style={{width:"100%",maxWidth:320}}>
-            <h4 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ffd700",marginBottom:10,letterSpacing:1}}>🏆 TOP 5 — RUN</h4>
-            {leaderboard===null?(
-              <div style={{display:"flex",justifyContent:"center",padding:20}}><Spinner/></div>
-            ):leaderboard.length===0?(
-              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.35)"}}>No scores yet — you could be first!</p>
-            ):(
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                {leaderboard.map((e,i)=>{
-                  const isMe = submitted && e.name===name.trim() && e.score===score;
-                  const medal = i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`;
-                  return(
-                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                      padding:"8px 12px",borderRadius:8,
-                      background:isMe?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",
-                      border:`1px solid ${isMe?"#ffd70066":"rgba(255,255,255,0.08)"}`}}>
-                      <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,fontWeight:700,color:isMe?"#ffd700":"#fff"}}>{medal} {e.name}</span>
-                      <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          <div style={{display:"flex",gap:10,marginTop:20}}>
-            <button onClick={playAgain}
-              style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
-                background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
-                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
-              ↻ PLAY AGAIN
-            </button>
-            <button onClick={onExit}
-              style={{padding:"10px 20px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",cursor:"pointer",
-                background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",
-                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
-              EXIT
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function LeaderboardOnly({gameId,title,onPlay}){
   const [leaderboard,setLeaderboard]=useState(null);
   useEffect(()=>{
@@ -945,11 +662,23 @@ function LeaderboardOnly({gameId,title,onPlay}){
   );
 }
 
+// ── Coming Soon placeholder (replaces the broken "Run" game) ────────────────
+function ComingSoonBoard(){
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:14,padding:"20px 10px"}}>
+      <div style={{fontSize:52,animation:"floatSlow 2.4s ease-in-out infinite"}}>🚧</div>
+      <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#ffd700"}}>Coming Soon!</h3>
+      <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.5)",maxWidth:280,lineHeight:1.6}}>
+        A brand-new game is being built for the arcade. Check back soon, ninjas! 🥷
+      </p>
+    </div>
+  );
+}
+
 // gameId (used in GAMES_LIST/hub) -> display + leaderboard metadata
 const GAME_META = {
   memory: {title:"Memory Match", icon:"🧠", leaderboardId:"memoryMatch"},
   dino:   {title:"Dino Runner",  icon:"🦖", leaderboardId:"dino"},
-  run:    {title:"Run",          icon:"🕳️", leaderboardId:"run"},
 };
 
 function GameModal({gameId,initialMode,defaultName,onClose}){
@@ -978,9 +707,7 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
             ?<LeaderboardOnly gameId={meta.leaderboardId} title={meta.title} onPlay={()=>setMode("play")}/>
             :gameId==="dino"
               ?<DinoGame defaultName={defaultName} onExit={onClose}/>
-              :gameId==="run"
-                ?<RunGame defaultName={defaultName} onExit={onClose}/>
-                :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
+              :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
           }
         </div>
       </Glass>
@@ -993,21 +720,16 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
 const GAMES_LIST = [
   {id:"memory",name:"Memory Match",icon:"🧠",desc:"Flip cards, find pairs, don't run out of hearts.",active:true},
   {id:"dino",name:"Dino Runner",icon:"🦖",desc:"Jump the cacti in this classic offline runner.",active:true},
-  {id:"run",name:"Run",icon:"🕳️",desc:"An endless space-tunnel floor that keeps breaking apart. Jump the gaps — it never ends.",active:true},
+  {id:"comingsoon",name:"Coming Soon",icon:"🚧",desc:"A new game is on the way — stay tuned!",active:false},
 ];
 
 function GamesTab({isAdmin,studentUsername}){
-  const [settings,setSettings]=useState(null);
-  const [savingSetting,setSavingSetting]=useState(false);
   const [modal,setModal]=useState(null); // {gameId, mode}
   const [breakData,setBreakData]=useState(null);
   const [nowTick,setNowTick]=useState(Date.now());
 
-  useEffect(()=>{
-    window.fbGames.getSettings().then(setSettings).catch(()=>setSettings({breakMode:false}));
-  },[]);
-
-  // Live-listen for this student's break flag so ending it (or it expiring) is reflected instantly.
+  // Live-listen for this student's break flag (set from "Start Break" on In The Dojo)
+  // so ending it (or it expiring) is reflected instantly.
   useEffect(()=>{
     if(!studentUsername) return;
     const unsubscribe = window.fbGames.watchStudentBreak(studentUsername, setBreakData);
@@ -1020,20 +742,8 @@ function GamesTab({isAdmin,studentUsername}){
     return ()=>clearInterval(iv);
   },[]);
 
-  async function toggleBreak(){
-    if(!settings||savingSetting) return;
-    setSavingSetting(true);
-    const next=!settings.breakMode;
-    try{
-      await window.fbGames.setBreakMode(next);
-      setSettings({...settings,breakMode:next});
-    } catch(e){ console.warn(e); }
-    setSavingSetting(false);
-  }
-
-  const breakOn = settings&&settings.breakMode;
   const myBreakOn = window.cnIsBreakActive(breakData);
-  const locked = !isAdmin && !breakOn && !myBreakOn;
+  const locked = !isAdmin && !myBreakOn;
   const remainingMs = (myBreakOn && breakData&&breakData.startedAt) ? Math.max(0,(breakData.startedAt+window.BREAK_DURATION_MS)-nowTick) : 0;
   const remainingLabel = remainingMs>0 ? `${Math.floor(remainingMs/60000)}:${String(Math.floor((remainingMs%60000)/1000)).padStart(2,"0")}` : null;
 
@@ -1049,15 +759,7 @@ function GamesTab({isAdmin,studentUsername}){
           background:"linear-gradient(135deg,#ff2d78,#ffd700)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}}>
           🎮 Break Time Games
         </h2>
-        {settings&&(
-          <div style={{padding:"4px 12px",borderRadius:99,
-            background:breakOn?"rgba(57,255,20,0.12)":"rgba(255,45,120,0.1)",
-            border:`1px solid ${breakOn?"#39ff1444":"#ff2d7844"}`,
-            fontFamily:"'Fira Code',monospace",fontSize:9,color:breakOn?"#39ff14":"#ff2d78"}}>
-            {breakOn?"🟢 BREAK MODE ACTIVE":"🔴 GAMES LOCKED"}
-          </div>
-        )}
-        {!isAdmin&&studentUsername&&!breakOn&&(
+        {!isAdmin&&studentUsername&&(
           <div style={{padding:"4px 12px",borderRadius:99,
             background:myBreakOn?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.05)",
             border:`1px solid ${myBreakOn?"#39ff1444":"rgba(255,255,255,0.1)"}`,
@@ -1067,43 +769,22 @@ function GamesTab({isAdmin,studentUsername}){
         )}
       </div>
       <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:20}}>
-        Games unlock only during break — ask your Sensei!
+        Games unlock only during your break — ask your Sensei to start it from "In The Dojo"!
       </p>
-
-      {isAdmin&&(
-        <Glass style={{padding:"14px 18px",marginBottom:24,borderColor:"#ffd70033",background:"rgba(255,215,0,0.05)"}}>
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
-            <div>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:"#ffd700",marginBottom:2}}>SENSEI CONTROL</div>
-              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)"}}>
-                Turn this on to let students play during break.
-              </div>
-            </div>
-            <button onClick={toggleBreak} disabled={!settings||savingSetting}
-              style={{padding:"10px 22px",borderRadius:99,border:"none",cursor:!settings||savingSetting?"not-allowed":"pointer",
-                background:savingSetting?"rgba(255,255,255,0.1)":breakOn?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#39ff14,#00cfff)",
-                color:savingSetting?"rgba(255,255,255,0.3)":"#000",
-                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1,
-                display:"flex",alignItems:"center",gap:8}}>
-              {savingSetting?<><Spinner/> SAVING...</>:breakOn?"⏹ END BREAK":"▶ START BREAK"}
-            </button>
-          </div>
-        </Glass>
-      )}
 
       {locked?(
         <Glass style={{padding:44,textAlign:"center",borderColor:"rgba(255,45,120,0.25)"}}>
           <div style={{fontSize:42,marginBottom:12}}>🔒</div>
           <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:15,color:"#ff2d78",marginBottom:8}}>Games are locked right now</h3>
           <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.4)"}}>
-            Ask your Sensei to start break time to unlock the games!
+            Ask your Sensei to start your break time on "In The Dojo" to unlock the games!
           </p>
         </Glass>
       ):(
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:18}}>
           {GAMES_LIST.map((g,i)=>(
             <Glass key={g.id} style={{padding:20,borderColor:g.active?"rgba(57,255,20,0.2)":"rgba(255,255,255,0.06)",
-              opacity:g.active?1:0.55,animation:`fadeUp .35s ease both ${i*.06}s`}}>
+              opacity:g.active?1:0.75,animation:`fadeUp .35s ease both ${i*.06}s`}}>
               <div style={{fontSize:34,marginBottom:10}}>{g.icon}</div>
               <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:15,color:"#fff",marginBottom:6}}>{g.name}</div>
               <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:16,lineHeight:1.5,minHeight:30}}>
@@ -1121,10 +802,11 @@ function GamesTab({isAdmin,studentUsername}){
                       fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>🏆</button>
                 </div>
               ):(
-                <div style={{padding:"9px",borderRadius:9,textAlign:"center",background:"rgba(255,255,255,0.05)",
-                  border:"1px solid rgba(255,255,255,0.1)",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)"}}>
-                  🔒 Coming Soon
-                </div>
+                <button onClick={()=>setModal({gameId:g.id,mode:"play"})}
+                  style={{width:"100%",padding:"9px",borderRadius:9,textAlign:"center",background:"rgba(255,255,255,0.05)",
+                    border:"1px solid rgba(255,255,255,0.1)",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)"}}>
+                  🚧 Coming Soon
+                </button>
               )}
             </Glass>
           ))}
@@ -1132,25 +814,31 @@ function GamesTab({isAdmin,studentUsername}){
       )}
 
       {modal&&(
-        <GameModal gameId={modal.gameId} initialMode={modal.mode} defaultName={studentUsername||""} onClose={()=>setModal(null)}/>
+        modal.gameId==="comingsoon"
+          ?ReactDOM.createPortal(
+              <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(2,2,6,0.85)",backdropFilter:"blur(6px)",
+                display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+                <Glass style={{width:"100%",maxWidth:400,padding:"26px",position:"relative",borderColor:"#ffd70033"}}>
+                  <button onClick={()=>setModal(null)}
+                    style={{position:"absolute",top:14,right:14,background:"rgba(255,255,255,0.08)",
+                      border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",
+                      width:30,height:30,cursor:"pointer",fontSize:15}}>✕</button>
+                  <ComingSoonBoard/>
+                </Glass>
+              </div>,
+              document.body
+            )
+          :<GameModal gameId={modal.gameId} initialMode={modal.mode} defaultName={studentUsername||""} onClose={()=>setModal(null)}/>
       )}
     </div>
   );
 }
 
 function GamesApp(){
-  const [auth,setAuth]=useState(null);
-  const [loading,setLoading]=useState(true);
+  const {auth,ready} = window.useCnAuth();
   const isMobile=useIsMobile();
 
-  useEffect(()=>{
-    const role = localStorage.getItem("cn_role");
-    if(!role){ window.location.href="index.html"; return; }
-    setAuth({role,username:localStorage.getItem("cn_username")});
-    setLoading(false);
-  },[]);
-
-  if(!auth||loading) return <LoadingScreen status="Loading arcade..."/>;
+  if(!auth) return <LoadingScreen status="Loading arcade..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
 
   return(
