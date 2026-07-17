@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Code Ninjas – Ninja Chat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#060609;color:#fff;}
+#root{min-height:100vh;display:flex;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+input::placeholder,textarea::placeholder{color:rgba(255,255,255,0.2);}
+select option{background:#0a0a0f;color:#fff;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@keyframes bubbleIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:768px){#root{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="shared.js"></script>
+<script>
+// Ninja Chat data layer. Messages are stored flat under "chat/messages" and
+// streamed live. Profanity-filtered client-side in shared.js (cnContainsBadWords)
+// BEFORE anything is ever written to Firebase, so blocked messages never
+// reach other ninjas' screens.
+window.fbChat = {
+  MAX_MESSAGES: 200,
+  listen(callback){
+    const ref = window.cnDb.ref("chat/messages").limitToLast(this.MAX_MESSAGES);
+    const handler = snap => {
+      const val = snap.val() || {};
+      const list = Object.entries(val).map(([id,m])=>({id,...m})).sort((a,b)=>(a.ts||0)-(b.ts||0));
+      callback(list);
+    };
+    ref.on("value", handler);
+    return () => ref.off("value", handler);
+  },
+  async send(senderName, role, text){
+    const ref = window.cnDb.ref("chat/messages").push();
+    await ref.set({senderName, role, text, ts: Date.now()});
+    return {id: ref.key};
+  },
+  async deleteMessage(id){
+    await window.cnDb.ref(`chat/messages/${id}`).remove();
+  }
+};
+</script>
+<script type="text/babel">
+const {useState,useEffect,useRef} = React;
+const CHAT_MAX_LEN = 300;
+
+function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
+  return(
+    <div onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
+      background:"rgba(255,255,255,0.06)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
+      border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",...style
+    }}>{children}</div>
+  );
+}
+function Toast({msg,color="#39ff14",onDone}){
+  useEffect(()=>{const t=setTimeout(onDone,3500);return()=>clearTimeout(t);},[]);
+  return(
+    <div style={{position:"fixed",bottom:24,right:16,left:16,zIndex:9999,maxWidth:380,margin:"0 auto",
+      background:"rgba(10,10,20,0.96)",border:`1px solid ${color}`,borderRadius:12,
+      padding:"14px 20px",color,fontFamily:"'Fira Code',monospace",fontWeight:600,fontSize:13,
+      boxShadow:`0 0 24px ${color}55`,animation:"slideIn .3s ease"}}>{msg}</div>
+  );
+}
+function Spinner(){
+  return <div style={{width:16,height:16,border:"2px solid rgba(255,255,255,0.2)",borderTop:"2px solid #39ff14",borderRadius:"50%",animation:"spin .8s linear infinite",display:"inline-block"}}/>;
+}
+function LoadingScreen({status}){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:36,height:36,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
+    </div>
+  );
+}
+function useIsMobile(){
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return mobile;
+}
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
+
+function MobileNav({active,isAdmin,isStudent,studentUsername}){
+  const [open,setOpen]=useState(false);
+  return(
+    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{padding:"3px 8px",borderRadius:99,
+            background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+            border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,
+            color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
+          </div>
+          <button onClick={()=>setOpen(!open)} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",padding:"6px 10px",cursor:"pointer",fontSize:16}}>{open?"✕":"☰"}</button>
+        </div>
+      </div>
+      {open&&(
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+          {NAV.map(item=>(
+            <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+              display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
+              background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
+              color:active===item.id?"#fff":"rgba(255,255,255,0.6)"}}>
+              <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+            </button>
+          ))}
+          <button onClick={doLogout} style={{padding:"9px 14px",borderRadius:10,border:"1px solid rgba(255,45,120,0.3)",background:"rgba(255,45,120,0.08)",color:"#ff2d78",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1}}>← LOG OUT</button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Sidebar({active,isAdmin,isStudent,studentUsername}){
+  return(
+    <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",padding:"22px 14px",gap:6,
+      background:"rgba(0,0,0,0.35)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
+      borderRight:"1px solid rgba(255,255,255,0.06)",zIndex:10,position:"sticky",top:0}}>
+      <div style={{padding:"10px 10px 20px",textAlign:"center"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
+        <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
+        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+          background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+          border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
+          <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",letterSpacing:1,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"ADMIN":isStudent?studentUsername:"GUEST"}
+          </span>
+        </div>
+      </div>
+      {NAV.map(item=>(
+        <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+          display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
+          fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
+          background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
+          color:active===item.id?"#fff":"rgba(255,255,255,0.4)",
+          boxShadow:active===item.id?"inset 0 0 0 1px rgba(57,255,20,0.3),0 0 16px rgba(57,255,20,0.1)":"none"}}
+          onMouseEnter={e=>{if(active!==item.id){e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="#fff";}}}
+          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
+          <span style={{fontSize:17}}>{item.icon}</span>{item.label}
+        </button>
+      ))}
+      <div style={{marginTop:"auto",padding:"0 0 4px"}}>
+        <Glass style={{padding:"11px 14px",marginBottom:8}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
+        </Glass>
+        <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
+          background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
+          fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1,transition:"all .2s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,45,120,0.1)";e.currentTarget.style.borderColor="#ff2d7844";e.currentTarget.style.color="#ff2d78";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.03)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";e.currentTarget.style.color="rgba(255,255,255,0.35)";}}>
+          ← LOG OUT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function timeLabel(ts){
+  if(!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+}
+
+function ChatBubble({msg,isMe,isAdmin,onDelete}){
+  const [hover,setHover]=useState(false);
+  const roleColor = msg.role==="admin" ? "#39ff14" : msg.role==="student" ? "#ffd700" : "#00cfff";
+  return(
+    <div onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
+      style={{display:"flex",flexDirection:"column",alignItems:isMe?"flex-end":"flex-start",marginBottom:14,animation:"bubbleIn .25s ease both"}}>
+      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4,padding:isMe?"0 4px 0 0":"0 0 0 4px"}}>
+        <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,fontWeight:700,color:roleColor}}>
+          {msg.role==="admin" ? "🔐 Sensei" : msg.senderName}
+        </span>
+        <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)"}}>{timeLabel(msg.ts)}</span>
+        {isAdmin && hover && (
+          <button onClick={()=>onDelete(msg.id)} title="Delete message" style={{background:"rgba(255,45,120,0.12)",border:"1px solid rgba(255,45,120,0.3)",
+            borderRadius:6,color:"#ff2d78",fontSize:9,cursor:"pointer",padding:"1px 6px",fontFamily:"'Fira Code',monospace"}}>✕ delete</button>
+        )}
+      </div>
+      <div style={{maxWidth:"min(480px,80vw)",padding:"10px 14px",borderRadius:isMe?"14px 14px 3px 14px":"14px 14px 14px 3px",
+        background:isMe?"linear-gradient(135deg,rgba(57,255,20,0.16),rgba(0,207,255,0.1))":"rgba(255,255,255,0.06)",
+        border:`1px solid ${isMe?"rgba(57,255,20,0.25)":"rgba(255,255,255,0.1)"}`,
+        fontFamily:"'Exo 2',sans-serif",fontSize:13.5,lineHeight:1.5,color:"#fff",wordBreak:"break-word",whiteSpace:"pre-wrap"}}>
+        {msg.text}
+      </div>
+    </div>
+  );
+}
+
+function ChatTab({auth,isAdmin,isStudent,isGuest,setToast}){
+  const [messages,setMessages]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [draft,setDraft]=useState("");
+  const [sending,setSending]=useState(false);
+  const scrollRef = useRef(null);
+  const bottomRef = useRef(null);
+
+  useEffect(()=>{
+    const unsub = window.fbChat.listen(list=>{ setMessages(list); setLoading(false); });
+    return unsub;
+  },[]);
+
+  useEffect(()=>{
+    if(bottomRef.current) bottomRef.current.scrollIntoView({behavior:"smooth",block:"end"});
+  },[messages.length]);
+
+  const senderName = isAdmin ? "Sensei" : (isStudent ? auth.username : "Guest");
+  const canSend = isAdmin || isStudent;
+
+  async function send(){
+    const text = draft.trim();
+    if(!text || sending) return;
+    if(text.length > CHAT_MAX_LEN){
+      setToast({msg:`Messages must be under ${CHAT_MAX_LEN} characters.`,color:"#ff2d78"});
+      return;
+    }
+    if(window.cnContainsBadWords(text)){
+      setToast({msg:"⚠️ That message contains language that isn't allowed in Ninja Chat. Please rephrase.",color:"#ff2d78"});
+      return;
+    }
+    setSending(true);
+    try{
+      await window.fbChat.send(senderName, isAdmin?"admin":"student", text);
+      setDraft("");
+    }catch(e){
+      console.warn(e);
+      setToast({msg:"Couldn't send — check your connection and try again.",color:"#ff2d78"});
+    }
+    setSending(false);
+  }
+
+  async function handleDelete(id){
+    try{ await window.fbChat.deleteMessage(id); setToast({msg:"Message deleted.",color:"#00cfff"}); }
+    catch(e){ setToast({msg:"Couldn't delete that message.",color:"#ff2d78"}); }
+  }
+
+  return(
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",padding:"clamp(16px,3vw,32px)",maxWidth:900,margin:"0 auto",width:"100%"}}>
+      <div style={{marginBottom:18,animation:"fadeUp .5s ease both"}}>
+        <div style={{display:"inline-block",background:"rgba(57,255,20,0.1)",border:"1px solid #39ff1444",borderRadius:99,padding:"5px 14px",marginBottom:10}}>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14",letterSpacing:1.5}}>💬 LIVE</span>
+        </div>
+        <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(18px,2.6vw,28px)",fontWeight:900,marginBottom:6}}>Ninja Chat</h1>
+        <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12.5,color:"rgba(255,255,255,0.45)"}}>
+          A friendly space for ninjas to chat. Be kind — inappropriate messages are automatically blocked, and Senseis can remove any message.
+        </p>
+      </div>
+
+      <Glass style={{flex:1,display:"flex",flexDirection:"column",padding:0,overflow:"hidden",minHeight:420,animation:"fadeUp .5s ease .1s both"}}>
+        <div ref={scrollRef} style={{flex:1,overflowY:"auto",padding:"18px",display:"flex",flexDirection:"column"}}>
+          {loading?(
+            <div style={{margin:"auto",display:"flex",flexDirection:"column",alignItems:"center",gap:10,color:"rgba(255,255,255,0.3)"}}>
+              <Spinner/><span style={{fontFamily:"'Fira Code',monospace",fontSize:11}}>Loading messages...</span>
+            </div>
+          ):messages.length===0?(
+            <div style={{margin:"auto",textAlign:"center",color:"rgba(255,255,255,0.3)"}}>
+              <div style={{fontSize:32,marginBottom:10}}>🥷</div>
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13}}>No messages yet — say hi to your fellow ninjas!</p>
+            </div>
+          ):(
+            <>
+              {messages.map(m=>(
+                <ChatBubble key={m.id} msg={m} isAdmin={isAdmin}
+                  isMe={isAdmin ? m.role==="admin" : (m.senderName===senderName && m.role!=="admin")}
+                  onDelete={handleDelete}/>
+              ))}
+              <div ref={bottomRef}/>
+            </>
+          )}
+        </div>
+
+        <div style={{borderTop:"1px solid rgba(255,255,255,0.08)",padding:"14px 16px",background:"rgba(0,0,0,0.2)"}}>
+          {canSend ? (
+            <div style={{display:"flex",gap:10,alignItems:"flex-end"}}>
+              <textarea value={draft} onChange={e=>setDraft(e.target.value)}
+                onKeyDown={e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); send(); } }}
+                placeholder="Type a message... (Enter to send)" rows={1} maxLength={CHAT_MAX_LEN}
+                style={{flex:1,resize:"none",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",
+                  borderRadius:10,padding:"11px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:13.5,outline:"none",
+                  boxSizing:"border-box",maxHeight:110}}
+                onFocus={e=>e.target.style.borderColor="#39ff14"}
+                onBlur={e=>e.target.style.borderColor="rgba(255,255,255,0.15)"}/>
+              <button onClick={send} disabled={sending||!draft.trim()} style={{padding:"12px 20px",borderRadius:10,border:"none",
+                cursor:(sending||!draft.trim())?"not-allowed":"pointer",
+                background:(sending||!draft.trim())?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                color:(sending||!draft.trim())?"rgba(255,255,255,0.3)":"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,
+                display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                {sending?<Spinner/>:"SEND ⚡"}
+              </button>
+            </div>
+          ):(
+            <div style={{textAlign:"center",padding:"6px 0"}}>
+              <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)"}}>
+                👀 Guests can read Ninja Chat but can't send messages. Log in as a ninja to join the conversation!
+              </p>
+            </div>
+          )}
+        </div>
+      </Glass>
+    </div>
+  );
+}
+
+function ChatApp(){
+  const {auth,ready} = window.useCnAuth();
+  const [toast,setToast]=useState(null);
+  const isMobile=useIsMobile();
+
+  if(!auth||!ready) return <LoadingScreen status="Loading Ninja Chat..."/>;
+  const isAdmin=auth.role==="admin", isStudent=auth.role==="student", isGuest=auth.role==="guest";
+
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",minHeight:"100vh",position:"relative",zIndex:1,width:"100%"}}>
+        {isMobile
+          ?<MobileNav active="chat" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+          :<Sidebar active="chat" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
+        }
+        <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
+          <ChatTab auth={auth} isAdmin={isAdmin} isStudent={isStudent} isGuest={isGuest} setToast={setToast}/>
+        </div>
+      </div>
+      {toast&&<Toast msg={toast.msg} color={toast.color||"#39ff14"} onDone={()=>setToast(null)}/>}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ChatApp/>);
+</script>
+</body>
+</html>
