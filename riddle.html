@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -30,22 +29,11 @@ select option{background:#0a0a0f;color:#fff;}
 </head>
 <body>
 <div id="root"></div>
+<script src="shared.js"></script>
 <script>
-const firebaseConfig = {
-  apiKey:"AIzaSyBaZLr1zIzGPYhl6e7Gqy0dI3o6ZuyvP4s",
-  authDomain:"githubpat-2d39d.firebaseapp.com",
-  projectId:"githubpat-2d39d",
-  storageBucket:"githubpat-2d39d.firebasestorage.app",
-  messagingSenderId:"375553339098",
-  appId:"1:375553339098:web:729bb04215f50217937fe3",
-  databaseURL:"https://githubpat-2d39d-default-rtdb.firebaseio.com"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.database();
-
 window.fbRiddles = {
   async getAll(){
-    const snap = await db.ref("riddles").once("value");
+    const snap = await window.cnDb.ref("riddles").once("value");
     const val = snap.val() || {};
     const map = {};
     for(const weekKey of Object.keys(val)){
@@ -61,43 +49,33 @@ window.fbRiddles = {
     return map;
   },
   async setRiddle(week,text,answer){
-    await db.ref(`riddles/week_${week}`).update({text,answer});
+    await window.cnDb.ref(`riddles/week_${week}`).update({text,answer});
   },
   async addSubmission(week,name,answer,ts){
-    const snap = await db.ref(`riddles/week_${week}/submissions`).orderByChild("name").equalTo(name).once("value");
+    const snap = await window.cnDb.ref(`riddles/week_${week}/submissions`).orderByChild("name").equalTo(name).once("value");
     const val = snap.val();
     if(val){
       const existingKey = Object.keys(val)[0];
-      await db.ref(`riddles/week_${week}/submissions/${existingKey}`).update({answer,ts});
+      await window.cnDb.ref(`riddles/week_${week}/submissions/${existingKey}`).update({answer,ts});
       return {id:existingKey};
     } else {
-      const ref = db.ref(`riddles/week_${week}/submissions`).push();
+      const ref = window.cnDb.ref(`riddles/week_${week}/submissions`).push();
       await ref.set({name,answer,ts});
       return {id:ref.key};
     }
   },
   async deleteSubmission(week,submissionId){
-    await db.ref(`riddles/week_${week}/submissions/${submissionId}`).remove();
+    await window.cnDb.ref(`riddles/week_${week}/submissions/${submissionId}`).remove();
   },
+  // name may be null, which means "no one got it correct this week".
   async setWinner(week,name){
-    await db.ref(`riddles/week_${week}`).update({winner:name,locked:true});
+    await window.cnDb.ref(`riddles/week_${week}`).update({winner:name===null?null:name,locked:true});
   }
 };
 </script>
 <script type="text/babel">
 const {useState,useEffect} = React;
-
-const WEEK_START = new Date("2026-05-14T00:00:00");
-function getCurrentWeek(){
-  const diff = new Date() - WEEK_START;
-  return diff < 0 ? 1 : Math.floor(diff/(7*24*60*60*1000))+1;
-}
-function getWeekLabel(n){
-  const s = new Date(WEEK_START.getTime()+(n-1)*7*24*60*60*1000);
-  const e = new Date(s.getTime()+6*24*60*60*1000);
-  const fmt = d => d.toLocaleDateString("en-US",{month:"short",day:"numeric"});
-  return `Week ${n} (${fmt(s)} – ${fmt(e)})`;
-}
+const NO_WINNER = "__NONE__"; // sentinel used for the "No one got it correct" option
 
 function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
   return(
@@ -138,16 +116,8 @@ function useIsMobile(){
   useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
   return mobile;
 }
-const NAV=[
-  {id:"home",icon:"🏠",label:"Home",href:"home.html"},
-  {id:"leaderboards",icon:"🏆",label:"Ring Toss",href:"entrygames.html"},
-  {id:"riddle",icon:"🧩",label:"Riddle",href:"riddle.html"},
-  {id:"notm",icon:"⭐",label:"NOTM",href:"notm.html"},
-  {id:"polls",icon:"📊",label:"Polls",href:"polls.html"},
-  {id:"nitd",icon:"📍",label:"In The Dojo",href:"nitd.html"},
-  {id:"games",icon:"🎮",label:"Games",href:"games.html"},
-];
-function doLogout(){ localStorage.removeItem("cn_role"); localStorage.removeItem("cn_username"); window.location.href="index.html"; }
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
 
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
@@ -217,7 +187,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
       <div style={{marginTop:"auto",padding:"0 0 4px"}}>
         <Glass style={{padding:"11px 14px",marginBottom:8}}>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
-          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {getCurrentWeek()}</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
         </Glass>
         <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
           background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
@@ -232,8 +202,8 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
 }
 
 function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRiddleMap}){
-  const cw = getCurrentWeek();
-  const totalWeeks = getCurrentWeek()+1;
+  const cw = window.getCurrentWeek();
+  const totalWeeks = window.getCurrentWeek()+1;
   const [week,setWeek] = useState(cw);
   const [sName,setSName] = useState(studentUsername||"");
   const [sAnswer,setSAnswer] = useState("");
@@ -309,7 +279,7 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
     setSaving(true);
     try{
       await window.fbRiddles.setRiddle(week,weekData.text,revealAnswer.trim().toLowerCase());
-      await db.ref(`riddles/week_${week}`).update({revealed:true});
+      await window.cnDb.ref(`riddles/week_${week}`).update({revealed:true});
       setRiddleMap(prev=>({...prev,[week]:{...weekData,answer:revealAnswer.trim().toLowerCase(),revealed:true}}));
       setRevealMode(false);setRevealAnswer("");
       setToast({msg:"Answer revealed! Grading is now active. 🎉",color:"#ffd700"});
@@ -321,10 +291,13 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
     if(!selectedWinner) return;
     setSaving(true);
     try{
-      await window.fbRiddles.setWinner(week,selectedWinner);
-      setRiddleMap(prev=>({...prev,[week]:{...weekData,winner:selectedWinner,locked:true}}));
+      const isNoWinner = selectedWinner===NO_WINNER;
+      await window.fbRiddles.setWinner(week, isNoWinner?null:selectedWinner);
+      setRiddleMap(prev=>({...prev,[week]:{...weekData,winner:isNoWinner?null:selectedWinner,locked:true}}));
       setGradeMode(false);setSelectedWinner(null);
-      setToast({msg:`🏆 ${selectedWinner} locked in as winner for Week ${week}!`,color:"#ffd700"});
+      setToast(isNoWinner
+        ?{msg:`Week ${week} locked — no one got it correct. 🤷`,color:"#ffd700"}
+        :{msg:`🏆 ${selectedWinner} locked in as winner for Week ${week}!`,color:"#ffd700"});
     } catch(e){setToast({msg:`Lock failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
@@ -347,11 +320,13 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
         <select value={week} onChange={e=>{setWeek(Number(e.target.value));setGradeMode(false);setEditMode(false);setRevealMode(false);}}
           style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,color:"#fff",padding:"7px 12px",fontFamily:"'Fira Code',monospace",fontSize:11,cursor:"pointer"}}>
           {Array.from({length:totalWeeks},(_,i)=>i+1).map(w=>(
-            <option key={w} value={w} style={{background:"#0a0a0f"}}>{getWeekLabel(w)}{w===cw?" ← Current":""}</option>
+            <option key={w} value={w} style={{background:"#0a0a0f"}}>{window.getWeekLabel(w)}{w===cw?" ← Current":""}</option>
           ))}
         </select>
         {isLocked?(
-          <div style={{padding:"4px 12px",borderRadius:99,background:"rgba(255,215,0,0.15)",border:"1px solid #ffd70055",fontFamily:"'Fira Code',monospace",fontSize:9,color:"#ffd700"}}>🏆 LOCKED — winner: {weekData.winner}</div>
+          <div style={{padding:"4px 12px",borderRadius:99,background:"rgba(255,215,0,0.15)",border:"1px solid #ffd70055",fontFamily:"'Fira Code',monospace",fontSize:9,color:"#ffd700"}}>
+            {weekData.winner?`🏆 LOCKED — winner: ${weekData.winner}`:"🤷 LOCKED — no one got it correct"}
+          </div>
         ):gradingActive?(
           <div style={{padding:"4px 12px",borderRadius:99,background:"rgba(57,255,20,0.1)",border:"1px solid #39ff1433",fontFamily:"'Fira Code',monospace",fontSize:9,color:"#39ff14"}}>✅ ANSWER REVEALED — grading active</div>
         ):(
@@ -368,10 +343,10 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
       {isLocked&&(
         <Glass style={{padding:"18px 24px",marginBottom:24,borderColor:"#ffd70044",background:"rgba(255,215,0,0.06)",boxShadow:"0 0 30px #ffd70022"}}>
           <div style={{display:"flex",alignItems:"center",gap:14,flexWrap:"wrap"}}>
-            <span style={{fontSize:32}}>👑</span>
+            <span style={{fontSize:32}}>{weekData.winner?"👑":"🤷"}</span>
             <div>
-              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:700,color:"#ffd700",marginBottom:3}}>Week {week} Winner</div>
-              <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:18,fontWeight:700,color:"#fff"}}>{weekData.winner}</div>
+              <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:700,color:"#ffd700",marginBottom:3}}>Week {week} {weekData.winner?"Winner":"Result"}</div>
+              <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:18,fontWeight:700,color:"#fff"}}>{weekData.winner||"No one got it correct"}</div>
               <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,215,0,0.5)",marginTop:2}}>🔒 Result locked — cannot be changed</div>
             </div>
           </div>
@@ -383,7 +358,7 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
             <div>
               <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,color:"#ffd700",marginBottom:4}}>🏆 SELECT THIS WEEK'S WINNER</div>
-              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)"}}>Choose one ninja — this cannot be undone after locking.</div>
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)"}}>Choose one ninja, or "No One" if nobody got it — this cannot be undone after locking.</div>
             </div>
             <button onClick={()=>setGradeMode(!gradeMode)}
               style={{background:gradeMode?"rgba(255,45,120,0.1)":"rgba(255,215,0,0.12)",
@@ -418,15 +393,29 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
                     </div>
                   );
                 })}
+                {/* "No one got it correct" — always available so a week doesn't have to be forced onto a wrong answer. */}
+                <div onClick={()=>setSelectedWinner(selectedWinner===NO_WINNER?null:NO_WINNER)}
+                  style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",borderRadius:12,cursor:"pointer",
+                    background:selectedWinner===NO_WINNER?"rgba(255,45,120,0.1)":"rgba(255,255,255,0.04)",
+                    border:`2px dashed ${selectedWinner===NO_WINNER?"#ff2d78":"rgba(255,255,255,0.15)"}`,transition:"all .15s"}}>
+                  <div style={{width:20,height:20,borderRadius:"50%",flexShrink:0,
+                    background:selectedWinner===NO_WINNER?"#ff2d78":"transparent",border:`2px solid ${selectedWinner===NO_WINNER?"#ff2d78":"rgba(255,255,255,0.3)"}`,
+                    display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>
+                    {selectedWinner===NO_WINNER&&<div style={{width:8,height:8,borderRadius:"50%",background:"#000"}}/>}
+                  </div>
+                  <span style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:13,color:selectedWinner===NO_WINNER?"#ff2d78":"rgba(255,255,255,0.6)"}}>
+                    🚫 No one got it correct this week
+                  </span>
+                </div>
               </div>
               <button onClick={lockWinner} disabled={!selectedWinner||saving}
                 style={{width:"100%",padding:"12px",borderRadius:10,border:"none",
                   cursor:!selectedWinner||saving?"not-allowed":"pointer",
-                  background:!selectedWinner||saving?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#ffd700,#ff8c00)",
+                  background:!selectedWinner||saving?"rgba(255,255,255,0.08)":selectedWinner===NO_WINNER?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#ffd700,#ff8c00)",
                   color:!selectedWinner||saving?"rgba(255,255,255,0.3)":"#000",
                   fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,
                   display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
-                {saving?<><Spinner/> Locking...</>:selectedWinner?`🔒 LOCK IN ${selectedWinner} AS WINNER`:"← Select a ninja above"}
+                {saving?<><Spinner/> Locking...</>:selectedWinner===NO_WINNER?"🔒 LOCK IN — NO WINNER THIS WEEK":selectedWinner?`🔒 LOCK IN ${selectedWinner} AS WINNER`:"← Select a ninja above"}
               </button>
             </>
           )}
@@ -582,21 +571,19 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
 }
 
 function RiddleApp(){
-  const [auth,setAuth]=useState(null);
+  const {auth,ready} = window.useCnAuth();
   const [riddleMap,setRiddleMap]=useState({});
   const [loading,setLoading]=useState(true);
   const [toast,setToast]=useState(null);
   const isMobile=useIsMobile();
 
   useEffect(()=>{
-    const role = localStorage.getItem("cn_role");
-    if(!role){ window.location.href="index.html"; return; }
-    setAuth({role,username:localStorage.getItem("cn_username")});
+    if(!ready) return;
     (async()=>{
       try{ setRiddleMap(await window.fbRiddles.getAll()); }catch(e){console.warn(e);}
       setLoading(false);
     })();
-  },[]);
+  },[ready]);
 
   if(!auth||loading) return <LoadingScreen status="Loading riddle..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
