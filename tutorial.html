@@ -31,6 +31,7 @@ select option{background:#0a0a0f;color:#fff;}
 <script src="shared.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
+const TourOverlay = window.CnTourOverlay;
 
 function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
   return(
@@ -61,7 +62,7 @@ function doLogout(){ window.cnSession.logout(); }
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
   return(
-    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+    <div data-tour-mobile-anchor="1" style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -79,7 +80,7 @@ function MobileNav({active,isAdmin,isStudent,studentUsername}){
       {open&&(
         <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
           {NAV.map(item=>(
-            <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+            <button key={item.id} data-tour-nav={item.id} onClick={()=>{window.location.href=item.href;}} style={{
               display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
               fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
               background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
@@ -112,7 +113,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
         </div>
       </div>
       {NAV.map(item=>(
-        <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+        <button key={item.id} data-tour-nav={item.id} onClick={()=>{window.location.href=item.href;}} style={{
           display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
           fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
           background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
@@ -141,118 +142,27 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
 }
 
 // -------------------------------------------------------------------------
-// Walkthrough content — short, punchy steps shown one at a time in a popup,
-// not a long scrolling document. Content differs for Sensei vs Ninja.
+// Walkthrough step content now lives in shared.js (window.CN_TOUR_CONTENT)
+// so it can be reused by the arrow-pointer tour on every page, not just here.
 // -------------------------------------------------------------------------
-const NINJA_STEPS = [
-  {icon:"🔑",title:"Logging in",color:"#ffd700",
-    body:<>Ask your Sensei to enter you into <b style={{color:"#ffd700"}}>Points</b> for the day. Then go to the login screen and type your <b>username</b> (like <code style={{color:"#00cfff"}}>first.last</code>) — no password needed as a ninja.</>},
-  {icon:"⏳",title:"Your 2-hour access window",color:"#ffd700",
-    body:<>You can only log in if you've been entered into Points <b>today</b>, and only for <b>2 hours</b> after that entry. After that (or after closing your tab), you'll be signed out — just ask your Sensei to enter you again.</>},
-  {icon:"📱",title:"One device at a time",color:"#ffd700",
-    body:<>Only one device can be logged into your account at once. If you try to log in somewhere else while already signed in, it'll be blocked — log out on your old device first.</>},
-  {icon:"🏆",title:"Points",color:"#39ff14",
-    body:<>See the weekly leaderboard, ranked by points earned each day. Your Sensei adds your daily score — check back to see how you and your friends rank!</>},
-  {icon:"🧩",title:"Riddle of the Week",color:"#39ff14",
-    body:<>Submit your best guess to the weekly riddle. Your Sensei locks in a winner once the week ends — sometimes nobody gets it right, and that's okay too!</>},
-  {icon:"⭐",title:"Ninja of the Month",color:"#39ff14",
-    body:<>A monthly hall of fame showing the top-scoring ninja each month, plus an all-time "best month ever" leaderboard.</>},
-  {icon:"📊",title:"Polls",color:"#39ff14",
-    body:<>Vote in polls your Sensei creates. Your voice helps decide dojo activities, game nights, and more!</>},
-  {icon:"📍",title:"In The Dojo",color:"#39ff14",
-    body:<>See which ninjas are currently checked in — a live view of who's in the dojo right now.</>},
-  {icon:"🎮",title:"Games",color:"#39ff14",
-    body:<>Games unlock only when your Sensei starts your break time from "In The Dojo." Once it's on, enjoy Memory Match or Dino Runner until your break ends!</>},
-  {icon:"💬",title:"Ninja Chat",color:"#39ff14",
-    body:<>Chat with other ninjas in a friendly, moderated space. Inappropriate language is automatically blocked, and Senseis can remove any message.</>},
-];
 
-const ADMIN_STEPS = [
-  {icon:"🔐",title:"Logging in as Sensei",color:"#39ff14",
-    body:<>On the login screen, enter the shared <b style={{color:"#39ff14"}}>Sensei password</b> instead of a username. Multiple Senseis can be signed in on their own devices at the same time.</>},
-  {icon:"🏆",title:"Adding ninjas to Points",color:"#39ff14",
-    body:<>Go to <b>Points</b> and use "+ Add Entry" to log a ninja's first name and their score for today. This is also what unlocks that ninja's 2-hour login window.</>},
-  {icon:"🧩",title:"Managing the Riddle",color:"#39ff14",
-    body:<>Set the weekly riddle text and answer, review submissions, and lock in a winner. If nobody solves it, choose <b>"No One"</b> instead of picking a name.</>},
-  {icon:"⭐",title:"Ninja of the Month",color:"#39ff14",
-    body:<>Add or remove monthly point totals per ninja. The highest score each month wins, and the all-time "Hall of Fame" tracks each ninja's best month ever.</>},
-  {icon:"📊",title:"Polls",color:"#39ff14",
-    body:<>Create new polls, watch votes roll in live, and archive or delete old polls once they're no longer needed.</>},
-  {icon:"📍",title:"In The Dojo & Break Time",color:"#39ff14",
-    body:<>See every ninja currently within their 2-hour window. From here, start or end a ninja's break — starting a break unlocks Games for that student, for up to 10 minutes.</>},
-  {icon:"💬",title:"Moderating Ninja Chat",color:"#39ff14",
-    body:<>As Sensei, you can delete any message in Ninja Chat by hovering over it and clicking "✕ delete." The filter blocks most inappropriate language automatically, but you're always the final backstop.</>},
-  {icon:"🖥️",title:"Session rules",color:"#39ff14",
-    body:<>Closing your tab signs you out immediately. Unlike ninjas, Senseis can be signed in on more than one device at once.</>},
-];
-
-// -------------------------------------------------------------------------
-// Popup walkthrough — one step at a time, not a long written page.
-// -------------------------------------------------------------------------
-function WalkthroughModal({steps, roleLabel, roleIcon, roleColor, onClose}){
-  const [i,setI]=useState(0);
-  const step = steps[i];
-  const last = i===steps.length-1;
-  return(
-    <div style={{position:"fixed",inset:0,zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",
-      background:"rgba(0,0,0,0.72)",backdropFilter:"blur(6px)",WebkitBackdropFilter:"blur(6px)",padding:16}}
-      onClick={onClose}>
-      <Glass style={{width:"100%",maxWidth:440,padding:"26px 26px 22px",position:"relative",borderColor:`${roleColor}44`,
-        boxShadow:`0 8px 40px rgba(0,0,0,0.55),0 0 30px ${roleColor}22`,animation:"fadeUp .35s ease both"}}
-        onClick={e=>e.stopPropagation()}>
-        <button onClick={onClose} style={{position:"absolute",top:14,right:14,background:"rgba(255,255,255,0.08)",
-          border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"rgba(255,255,255,0.6)",width:28,height:28,
-          cursor:"pointer",fontSize:13}}>✕</button>
-
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}>
-          <span style={{fontSize:16}}>{roleIcon}</span>
-          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1.5,color:roleColor}}>{roleLabel} WALKTHROUGH</span>
-        </div>
-
-        <div key={i} style={{animation:"fadeUp .3s ease both",minHeight:150}}>
-          <div style={{fontSize:34,marginBottom:10}}>{step.icon}</div>
-          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#fff",marginBottom:10,letterSpacing:.5}}>{step.title}</h3>
-          <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:13.5,color:"rgba(255,255,255,0.65)",lineHeight:1.65}}>{step.body}</div>
-        </div>
-
-        <div style={{display:"flex",justifyContent:"center",gap:6,margin:"20px 0 18px"}}>
-          {steps.map((s,idx)=>(
-            <div key={idx} onClick={()=>setI(idx)} style={{width:idx===i?18:6,height:6,borderRadius:99,cursor:"pointer",
-              background:idx===i?roleColor:"rgba(255,255,255,0.18)",transition:"all .2s"}}/>
-          ))}
-        </div>
-
-        <div style={{display:"flex",gap:10}}>
-          <button onClick={()=>setI(Math.max(0,i-1))} disabled={i===0} style={{flex:1,padding:"11px",borderRadius:10,
-            border:"1px solid rgba(255,255,255,0.15)",background:"rgba(255,255,255,0.04)",
-            color:i===0?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.7)",cursor:i===0?"not-allowed":"pointer",
-            fontFamily:"'Fira Code',monospace",fontSize:11,letterSpacing:1}}>← BACK</button>
-          <button onClick={()=>last?onClose():setI(i+1)} style={{flex:1,padding:"11px",borderRadius:10,border:"none",
-            background:`linear-gradient(135deg,${roleColor},#00cfff)`,color:"#000",cursor:"pointer",
-            fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1}}>
-            {last?"FINISH ✓":"NEXT →"}
-          </button>
-        </div>
-        <div style={{textAlign:"center",marginTop:12,fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)"}}>
-          Step {i+1} of {steps.length}
-        </div>
-      </Glass>
-    </div>
-  );
-}
-
-function TutorialLauncher({isAdmin,onOpen}){
+function TutorialLauncher({role}){
+  const isAdmin = role==="admin", isGuest = role==="guest";
   return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <Glass style={{padding:"clamp(28px,4vw,44px)",maxWidth:460,textAlign:"center"}}>
-        <div style={{fontSize:40,marginBottom:14}}>{isAdmin?"🔐":"🥷"}</div>
+        <div style={{fontSize:40,marginBottom:14}}>{isAdmin?"🔐":isGuest?"👀":"🥷"}</div>
         <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(18px,2.4vw,24px)",fontWeight:900,marginBottom:10}}>
-          {isAdmin?"Sensei Walkthrough":"Ninja Walkthrough"}
+          {isAdmin?"Sensei Walkthrough":isGuest?"Guest Walkthrough":"Ninja Walkthrough"}
         </h1>
         <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,0.5)",lineHeight:1.6,marginBottom:22}}>
-          A quick guided tour of the dashboard, made for {isAdmin?"Senseis":"ninjas"} like you.
+          {isAdmin
+            ? "A guided tour of every tab, pointing out exactly what each one does and the Sensei controls on it."
+            : isGuest
+            ? "A guided tour of every tab so you know what's there — you're seeing sample data since guests don't see real students."
+            : "A guided tour that walks you through every tab and exactly what you can do on each one."}
         </p>
-        <button onClick={onOpen} style={{padding:"12px 28px",borderRadius:99,border:"none",cursor:"pointer",
+        <button onClick={()=>window.cnTour.start(role)} style={{padding:"12px 28px",borderRadius:99,border:"none",cursor:"pointer",
           background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
           fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1}}>
           ▶ START WALKTHROUGH
@@ -272,16 +182,13 @@ function TutorialLauncher({isAdmin,onOpen}){
 function TutorialApp(){
   const [checked,setChecked]=useState(false);
   const [session,setSession]=useState(null);
-  const [open,setOpen]=useState(true);
   const isMobile=useIsMobile();
 
   useEffect(()=>{
-    // Tutorial requires an active Sensei or Ninja login — guests and signed-out
-    // visitors are redirected, since the walkthrough only makes sense once
-    // someone knows which role they're using.
+    // Tutorial requires an active session (Sensei, Ninja, or Guest) — only
+    // fully signed-out visitors are redirected to the login screen.
     const s = window.cnSession.getSession();
     if(!s || window.cnSession.isExpired(s)){ window.location.href = "index.html"; return; }
-    if(s.role === "guest"){ window.location.href = "home.html"; return; }
     window.cnSession.resumeHeartbeat();
     setSession(s);
     setChecked(true);
@@ -291,7 +198,6 @@ function TutorialApp(){
 
   const isAdmin = session.role==="admin";
   const isStudent = session.role==="student";
-  const steps = isAdmin ? ADMIN_STEPS : NINJA_STEPS;
 
   return(
     <>
@@ -303,11 +209,10 @@ function TutorialApp(){
           :<Sidebar active="tutorial" isAdmin={isAdmin} isStudent={isStudent} studentUsername={session.username}/>
         }
         <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
-          <TutorialLauncher isAdmin={isAdmin} onOpen={()=>setOpen(true)}/>
+          <TutorialLauncher role={session.role}/>
         </div>
       </div>
-      {open && <WalkthroughModal steps={steps} roleLabel={isAdmin?"SENSEI":"NINJA"} roleIcon={isAdmin?"🔐":"🥷"}
-        roleColor={isAdmin?"#39ff14":"#ffd700"} onClose={()=>setOpen(false)}/>}
+      <TourOverlay/>
     </>
   );
 }
