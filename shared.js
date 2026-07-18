@@ -163,23 +163,28 @@
 
   // -------------------------------------------------------------------------
   // Ninja Chat moderation — bad-word list lives in Firebase (pushed in by the
-  // Sensei/admin directly) at "moderation/badWords" as a single comma-
-  // separated string (e.g. "word1,word2,word3"), so it can be updated
-  // without a code change. No profane words are stored in this file — the
-  // cache starts empty and is only ever filled from Firebase.
+  // Sensei/admin directly) at "moderation/badWords", so it can be updated
+  // without a code change. A small built-in fallback list is used until the
+  // Firebase list loads (or if it's ever empty).
   // -------------------------------------------------------------------------
-  window._cnBadWordsCache = [];
+  const CN_FALLBACK_BAD_WORDS = [
+    "fuck","shit","bitch","asshole","dumbass","bastard","dick","piss","slut","whore",
+    "nigger","nigga","fag","faggot","retard","retarded","cunt","cock","pussy",
+    "kill yourself","kys","rape","sex","porn","nude","naked",
+    "hell","damn","crap","idiot","stupid","dumb","shut up","loser","ugly","hate you"
+  ];
+  window._cnBadWordsCache = CN_FALLBACK_BAD_WORDS.slice();
 
   window.fbModeration = {
     async loadBadWords(){
       try{
         const snap = await db.ref("moderation/badWords").once("value");
         const val = snap.val();
-        if(typeof val === "string" && val.trim()){
-          const list = val.split(",").map(w=>String(w).trim().toLowerCase()).filter(Boolean);
-          if(list.length) window._cnBadWordsCache = list;
-        }
-      }catch(e){ /* keep whatever list we already have */ }
+        let list = null;
+        if(Array.isArray(val)) list = val.filter(Boolean);
+        else if(val && typeof val === "object") list = Object.values(val).filter(Boolean);
+        if(list && list.length) window._cnBadWordsCache = list.map(w=>String(w).toLowerCase());
+      }catch(e){ /* keep fallback list */ }
       return window._cnBadWordsCache;
     },
     // Records a flagged message and immediately bans the account key so the
@@ -427,5 +432,179 @@
     const norm = " " + String(text || "").toLowerCase().replace(/[^a-z0-9\s]/g," ") + " ";
     const list = window._cnBadWordsCache || [];
     return list.some(w => w && (norm.includes(" "+w+" ") || norm.includes(w)));
+  };
+
+  // -------------------------------------------------------------------------
+  // Guided walkthrough — a real, cross-page product tour. Each step targets
+  // a nav item (via data-tour-nav="<id>" on the actual sidebar/mobile button)
+  // and points an arrow-style callout at it, with role-specific copy:
+  //   ninja  -> only what a ninja themselves can do on that tab
+  //   admin  -> the Sensei controls (a superset of the ninja view)
+  //   guest  -> every tab is covered, same as admin, but notes that guests
+  //             are seeing sample data instead of real students
+  // Advancing a step navigates the browser to that tab's page; state is kept
+  // in sessionStorage so it survives the page load.
+  // -------------------------------------------------------------------------
+  window.CN_TOUR_TABS = ["home","leaderboards","riddle","notm","polls","nitd","games","chat"];
+  window.CN_TOUR_CONTENT = {
+    home:{title:"Home",
+      ninja:"This is your dashboard — a quick snapshot of this week's competition, like the top ninja and how many points have been logged today.",
+      admin:"This is the dashboard — a live snapshot of this week's competition across every ninja. Use it to see activity at a glance before diving into a tab.",
+      guest:"This is the dashboard. As a guest you're seeing sample numbers here — real ninjas and their points are only visible to signed-in accounts."},
+    leaderboards:{title:"Points",
+      ninja:"See the weekly leaderboard, ranked by the points your Sensei logs for you each day.",
+      admin:"This is where you log each ninja's daily score with \"+ Add Entry.\" It's also what unlocks that ninja's 2-hour login window for the day.",
+      guest:"The real Points page shows every ninja's daily score. You're seeing a sample leaderboard here instead of actual students."},
+    riddle:{title:"Riddle",
+      ninja:"Submit your best guess for the weekly riddle. Your Sensei locks in a winner once the week ends — sometimes nobody gets it, and that's okay!",
+      admin:"Set the weekly riddle and answer, review every ninja's submissions, and lock in a winner — or choose \"No One\" if nobody solved it.",
+      guest:"This tab shows the weekly riddle, and lets signed-in ninjas submit guesses. You're viewing a sample riddle and sample guess here."},
+    notm:{title:"Ninja of the Month",
+      ninja:"A monthly hall of fame — see the top-scoring ninja each month, plus the all-time \"best month ever\" leaderboard.",
+      admin:"Add or remove monthly point totals per ninja here. The highest score each month wins, and the Hall of Fame tracks the best month ever.",
+      guest:"Sample standings only — the real page ranks actual ninjas by their monthly point totals."},
+    polls:{title:"Polls",
+      ninja:"Vote in polls your Sensei creates — your voice helps decide dojo activities, game nights, and more.",
+      admin:"Create new polls, watch votes roll in live, and archive or delete old ones once they're no longer needed.",
+      guest:"You can see poll results here, but voting is only available to signed-in ninjas. This is a sample poll."},
+    nitd:{title:"In The Dojo",
+      ninja:"See which ninjas are currently checked in — a live view of who's in the dojo right now.",
+      admin:"See every ninja currently within their 2-hour window, and start or end their break time — that's what unlocks Games for them.",
+      guest:"This normally shows which real ninjas are checked in right now — you're seeing sample check-ins instead of actual students."},
+    games:{title:"Games",
+      ninja:"Games unlock only when your Sensei starts your break from \"In The Dojo.\" Play Memory Match or Dino Runner until your break ends!",
+      admin:"Ninjas can play here once you start their break from \"In The Dojo.\" You can also see the games leaderboards.",
+      guest:"Games are only playable by signed-in ninjas during break time — the scores shown to you here are sample data."},
+    chat:{title:"Ninja Chat",
+      ninja:"Chat with other ninjas in a friendly, moderated space. Inappropriate language is automatically blocked.",
+      admin:"Ninjas chat here. Hover a message and click \"✕ delete\" to remove anything inappropriate — you're always the final backstop.",
+      guest:"Guests can read chat but can't send messages, and you're seeing sample messages here instead of the real conversation."},
+  };
+
+  window.cnTour = {
+    start(role){
+      sessionStorage.setItem("cn_tour_active","1");
+      sessionStorage.setItem("cn_tour_role", role);
+      sessionStorage.setItem("cn_tour_step","0");
+      const first = window.CN_NAV.find(n=>n.id===window.CN_TOUR_TABS[0]);
+      window.location.href = first.href;
+    },
+    isActive(){ return sessionStorage.getItem("cn_tour_active")==="1"; },
+    exit(){
+      sessionStorage.removeItem("cn_tour_active");
+      sessionStorage.removeItem("cn_tour_role");
+      sessionStorage.removeItem("cn_tour_step");
+    }
+  };
+
+  // Plain React.createElement component (no JSX/Babel needed) so every page
+  // can mount the exact same overlay by just rendering <TourOverlay/>.
+  window.CnTourOverlay = function CnTourOverlay(){
+    const h = React.createElement;
+    const [state, setState] = React.useState(null); // {idx, tabId, title, text, rect}
+    const [tick, setTick] = React.useState(0);
+
+    function currentPageFile(){
+      const path = window.location.pathname.split("/").pop();
+      return path || "home.html";
+    }
+
+    function findTarget(){
+      const isMobileNow = window.innerWidth <= 768;
+      if(isMobileNow){
+        return document.querySelector('[data-tour-mobile-anchor]');
+      }
+      const idx = Number(sessionStorage.getItem("cn_tour_step")||0);
+      const tabId = window.CN_TOUR_TABS[idx];
+      return document.querySelector('[data-tour-nav="'+tabId+'"]');
+    }
+
+    function refresh(){
+      if(!window.cnTour.isActive()){ setState(null); return; }
+      const idx = Number(sessionStorage.getItem("cn_tour_step")||0);
+      const tabId = window.CN_TOUR_TABS[idx];
+      if(!tabId){ window.cnTour.exit(); setState(null); return; }
+      const navItem = window.CN_NAV.find(n=>n.id===tabId);
+      const curPage = currentPageFile();
+      if(navItem.href !== curPage){ setState(null); return; } // waiting for navigation
+      const role = sessionStorage.getItem("cn_tour_role") || "ninja";
+      const content = window.CN_TOUR_CONTENT[tabId];
+      const el = findTarget();
+      const rect = el ? el.getBoundingClientRect() : null;
+      setState({idx, total:window.CN_TOUR_TABS.length, tabId,
+        title: content.title, text: content[role] || content.ninja, rect,
+        mobile: window.innerWidth <= 768});
+    }
+
+    React.useEffect(()=>{
+      refresh();
+      const onResize = ()=>refresh();
+      window.addEventListener("resize", onResize);
+      window.addEventListener("scroll", onResize, true);
+      // Elements can mount slightly after first paint; a couple of retries
+      // covers that without needing a MutationObserver.
+      const t1=setTimeout(refresh,150), t2=setTimeout(refresh,500);
+      return ()=>{ window.removeEventListener("resize", onResize); window.removeEventListener("scroll", onResize, true); clearTimeout(t1); clearTimeout(t2); };
+    },[tick]);
+
+    function goTo(idx){
+      if(idx < 0){ return; }
+      if(idx >= window.CN_TOUR_TABS.length){ window.cnTour.exit(); window.location.href="home.html"; return; }
+      sessionStorage.setItem("cn_tour_step", String(idx));
+      const tabId = window.CN_TOUR_TABS[idx];
+      const navItem = window.CN_NAV.find(n=>n.id===tabId);
+      if(navItem.href !== currentPageFile()){ window.location.href = navItem.href; }
+      else{ setTick(t=>t+1); }
+    }
+
+    if(!state) return null;
+    const r = state.rect;
+    const roleColor = "#39ff14";
+
+    // Spotlight ring around the target element (fixed-position box with a
+    // glow border) plus a dim backdrop everywhere else.
+    const spotlight = r ? h("div",{style:{
+      position:"fixed", left:r.left-6, top:r.top-6, width:r.width+12, height:r.height+12,
+      borderRadius:12, border:`2px solid ${roleColor}`, boxShadow:`0 0 0 4000px rgba(0,0,0,0.55), 0 0 18px ${roleColor}aa`,
+      zIndex:301, pointerEvents:"none", transition:"all .25s ease"
+    }}) : h("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:301,pointerEvents:"none"}});
+
+    // Tooltip card: to the right of the sidebar item on desktop, or a bottom
+    // sheet on mobile where we don't have a precise per-item target.
+    let cardStyle;
+    if(state.mobile || !r){
+      cardStyle = {position:"fixed", left:16, right:16, bottom:16, zIndex:302};
+    } else {
+      const top = Math.min(Math.max(r.top-10,16), window.innerHeight-260);
+      cardStyle = {position:"fixed", left:r.right+18, top, width:300, zIndex:302};
+    }
+
+    const card = h("div",{style:{...cardStyle,
+        background:"rgba(10,10,16,0.97)", border:`1px solid ${roleColor}55`, borderRadius:14,
+        padding:"18px 18px 14px", boxShadow:`0 8px 32px rgba(0,0,0,0.5), 0 0 24px ${roleColor}22`,
+        fontFamily:"'Exo 2',sans-serif"}},
+      (!state.mobile && r) ? h("div",{style:{position:"absolute", left:-9, top:Math.min(24, r.height/2+1),
+        width:16,height:16, background:"rgba(10,10,16,0.97)", borderLeft:`1px solid ${roleColor}55`,
+        borderBottom:`1px solid ${roleColor}55`, transform:"rotate(45deg)"}}) : null,
+      h("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}},
+        h("span",{style:{fontFamily:"'Fira Code',monospace",fontSize:9,color:roleColor,letterSpacing:1.5}},
+          "STEP "+(state.idx+1)+" OF "+state.total),
+        h("button",{onClick:()=>{window.cnTour.exit(); setState(null);},
+          style:{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:7,
+            color:"rgba(255,255,255,0.6)",width:22,height:22,cursor:"pointer",fontSize:11,lineHeight:1}}, "✕")),
+      h("h4",{style:{fontFamily:"'Orbitron',sans-serif",fontSize:14,color:"#fff",marginBottom:6}}, state.title),
+      h("p",{style:{fontSize:12.5,color:"rgba(255,255,255,0.65)",lineHeight:1.55,marginBottom:14}}, state.text),
+      h("div",{style:{display:"flex",gap:8}},
+        h("button",{onClick:()=>goTo(state.idx-1), disabled:state.idx===0, style:{flex:1,padding:"9px",borderRadius:9,
+          border:"1px solid rgba(255,255,255,0.15)", background:"rgba(255,255,255,0.05)",
+          color:state.idx===0?"rgba(255,255,255,0.2)":"rgba(255,255,255,0.7)",
+          cursor:state.idx===0?"not-allowed":"pointer", fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1}}, "← BACK"),
+        h("button",{onClick:()=>goTo(state.idx+1), style:{flex:1,padding:"9px",borderRadius:9,border:"none",
+          background:`linear-gradient(135deg,${roleColor},#00cfff)`, color:"#000", cursor:"pointer",
+          fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:1}},
+          state.idx===state.total-1 ? "FINISH ✓" : "NEXT →"))
+    );
+
+    return h(React.Fragment, null, spotlight, card);
   };
 })();
