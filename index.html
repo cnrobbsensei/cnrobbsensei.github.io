@@ -201,14 +201,10 @@ function LoginScreen({onLogin}){
             onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.04)";e.currentTarget.style.color="rgba(255,255,255,0.6)";}}>
             👀 Continue as Guest (View Only)
           </button>
-          <button onClick={()=>window.location.href="tutorial.html"} style={{width:"100%",padding:"10px",borderRadius:10,border:"1px solid rgba(0,207,255,0.25)",cursor:"pointer",background:"rgba(0,207,255,0.06)",color:"#00cfff",fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,marginTop:10,transition:"all .2s"}}
-            onMouseEnter={e=>{e.currentTarget.style.background="rgba(0,207,255,0.12)";}}
-            onMouseLeave={e=>{e.currentTarget.style.background="rgba(0,207,255,0.06)";}}>
-            📘 View Tutorial (no login needed)
-          </button>
           <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.2)",textAlign:"center",marginTop:16,lineHeight:1.6}}>
             Students: you must be entered into Points today, within the last {window.SESSION_HOURS} hours, to log in.<br/>
-            Sensei: enter the Sensei password. Only one device may be signed in per account at a time.
+            Sensei: enter the Sensei password. Multiple Senseis may be signed in at once; ninjas get one device at a time.<br/>
+            📘 The dashboard walkthrough is available once you're signed in.
           </p>
         </Glass>
       </div>
