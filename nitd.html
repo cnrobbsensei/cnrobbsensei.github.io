@@ -30,6 +30,7 @@ html,body{height:100%;background:#060609;color:#fff;}
 <script src="shared.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
+const TourOverlay = window.CnTourOverlay;
 
 // Matches a Points first name (e.g. "Adam") to a registered username
 // (e.g. "adam.dodo") by comparing first names only.
@@ -89,7 +90,7 @@ function doLogout(){ window.cnSession.logout(); }
 function MobileNav({active,isAdmin,isStudent,studentUsername}){
   const [open,setOpen]=useState(false);
   return(
-    <div style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+    <div data-tour-mobile-anchor="1" style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -107,7 +108,7 @@ function MobileNav({active,isAdmin,isStudent,studentUsername}){
       {open&&(
         <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
           {NAV.map(item=>(
-            <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+            <button key={item.id} data-tour-nav={item.id} onClick={()=>{window.location.href=item.href;}} style={{
               display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
               fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
               background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
@@ -140,7 +141,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
         </div>
       </div>
       {NAV.map(item=>(
-        <button key={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+        <button key={item.id} data-tour-nav={item.id} onClick={()=>{window.location.href=item.href;}} style={{
           display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
           fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
           background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
@@ -364,6 +365,7 @@ function NITDApp(){
             isAdmin={isAdmin} onRefresh={()=>load(true)} refreshing={refreshing} onBreakChanged={reloadBreakStatuses}/>
         </div>
       </div>
+      <TourOverlay/>
     </>
   );
 }
