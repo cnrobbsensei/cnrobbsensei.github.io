@@ -42,8 +42,12 @@ function isInputWindowOpen(){ return true; }
 function groupEntries(entries){
   const map = {};
   for(const e of entries){
-    const key = `${e.week}|${e.name}|${e.date}`;
+    // Group case-insensitively so "john", "John", and "JOHN" are the same ninja —
+    // the displayed name uses whichever casing was typed most recently.
+    const nameKey = e.name.trim().toLowerCase();
+    const key = `${e.week}|${nameKey}|${e.date}`;
     if(!map[key]) map[key]={week:e.week,name:e.name,date:e.date,points:0,ids:[],attempts:0};
+    map[key].name = e.name; // keep most-recent casing for display
     map[key].points += e.points;
     map[key].attempts += 1;
     map[key].ids.push(e.id);
@@ -65,9 +69,11 @@ function calcBoard(groupedForWeek){
 function calcNinjaSummary(groupedForWeek){
   const map = {};
   for(const e of groupedForWeek){
-    if(!map[e.name]) map[e.name]={name:e.name,total:0,days:[]};
-    map[e.name].total += e.points;
-    map[e.name].days.push({date:e.date,points:e.points,attempts:e.attempts,ids:e.ids});
+    const nameKey = e.name.trim().toLowerCase();
+    if(!map[nameKey]) map[nameKey]={name:e.name,total:0,days:[]};
+    map[nameKey].name = e.name; // keep most-recent casing for display
+    map[nameKey].total += e.points;
+    map[nameKey].days.push({date:e.date,points:e.points,attempts:e.attempts,ids:e.ids});
   }
   return Object.values(map).sort((a,b)=>b.total-a.total);
 }
@@ -311,13 +317,14 @@ function EnterScores({allEntries,setAllEntries,setToast}){
     else if(p<0) errs.pts="No negative points!";
     if(Object.keys(errs).length){setErrors(errs);return;}
     setErrors({});setSaving(true);
+    const normName = window.cnNormalizeName(name);
     try{
-      const result=await window.fbLeaderboard.addEntry(cw,name.trim(),p,today);
-      const newEntry={id:result.id,week:cw,name:name.trim(),points:p,date:today,createdAt:Date.now()};
+      const result=await window.fbLeaderboard.addEntry(cw,normName,p,today);
+      const newEntry={id:result.id,week:cw,name:normName,points:p,date:today,createdAt:Date.now()};
       setAllEntries(prev=>[...prev,newEntry]);
       setPts("");
       const rem=MAX_ATTEMPTS_PER_DAY-(attemptsToday+1);
-      setToast({msg:rem>0?`${name.trim()} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${window.SESSION_HOURS}h`:`${name.trim()} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
+      setToast({msg:rem>0?`${normName} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${window.SESSION_HOURS}h`:`${normName} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
     } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
