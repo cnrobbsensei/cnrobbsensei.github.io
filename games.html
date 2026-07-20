@@ -764,8 +764,11 @@ function SnakeGame({defaultName,onExit}){
 
   function setDirection(dx,dy){
     const st=stateRef.current; if(!st||!st.running) return;
-    // ignore reversing straight into the snake's own neck
-    if(st.dir.x===-dx && st.dir.y===-dy) return;
+    // ignore reversing straight into the snake's own neck — check against
+    // whatever direction is already queued for the next tick, not just the
+    // last-committed one, so two quick key presses in the same tick can't
+    // sneak a reversal through.
+    if(st.nextDir.x===-dx && st.nextDir.y===-dy) return;
     st.nextDir={x:dx,y:dy};
   }
 
@@ -926,10 +929,10 @@ function SnakeGame({defaultName,onExit}){
             background:"rgba(255,255,255,0.03)",alignSelf:"center"}}>
             <canvas ref={canvasRef} width={W} height={H} style={{display:"block",width:"min(100%,300px)",height:"auto"}}/>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"38px 38px 38px",gridTemplateRows:"38px 38px",
+          <div style={{display:"grid",gridTemplateColumns:"38px 38px 38px",gridTemplateRows:"38px 38px 38px",
             gap:6,justifyContent:"center",margin:"14px 0 4px"}}>
             <div/><DPadBtn label="▲" dx={0} dy={-1}/><div/>
-            <DPadBtn label="◀" dx={-1} dy={0}/><DPadBtn label="▶" dx={1} dy={0}/>
+            <DPadBtn label="◀" dx={-1} dy={0}/><div/><DPadBtn label="▶" dx={1} dy={0}/>
             <div/><DPadBtn label="▼" dx={0} dy={1}/><div/>
           </div>
           <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:6}}>
