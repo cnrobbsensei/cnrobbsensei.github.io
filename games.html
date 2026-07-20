@@ -218,6 +218,7 @@ function MemoryMatchGame({defaultName,onExit}){
   const [hearts,setHearts]=useState(MAX_HEARTS);
   const [score,setScore]=useState(0);
   const [round,setRound]=useState(1);
+  const [roundKey,setRoundKey]=useState(0);
   const [deck,setDeck]=useState(()=>makeDeck());
   const [flipped,setFlipped]=useState([]);
   const [locked,setLocked]=useState(false);
@@ -234,7 +235,10 @@ function MemoryMatchGame({defaultName,onExit}){
   useEffect(()=>()=>{ timers.current.forEach(clearTimeout); },[]);
 
   // Briefly reveal the whole board at the start of every round so ninjas can memorize it,
-  // then flip everything face-down and unlock play.
+  // then flip everything face-down and unlock play. Keyed off `roundKey` — a counter that
+  // increments every time a fresh deck is dealt (new round, or Play Again) — rather than
+  // `round` or `deck` directly, since `deck` also changes (new array reference) whenever a
+  // correct match marks cards matched, and `round` can stay at 1 across a Play Again.
   useEffect(()=>{
     setPreviewing(true);
     setLocked(true);
@@ -244,7 +248,7 @@ function MemoryMatchGame({defaultName,onExit}){
     },PREVIEW_MS);
     timers.current.push(t);
     return ()=>clearTimeout(t);
-  },[deck]);
+  },[roundKey]);
 
   useEffect(()=>{
     if(deck.length && deck.every(c=>c.matched)){
@@ -252,6 +256,7 @@ function MemoryMatchGame({defaultName,onExit}){
         setScore(s=>s+200);
         setRound(r=>r+1);
         setDeck(makeDeck());
+        setRoundKey(k=>k+1);
       },550);
       timers.current.push(t);
     }
@@ -311,7 +316,7 @@ function MemoryMatchGame({defaultName,onExit}){
   }
 
   function playAgain(){
-    setHearts(MAX_HEARTS);setScore(0);setRound(1);setDeck(makeDeck());
+    setHearts(MAX_HEARTS);setScore(0);setRound(1);setDeck(makeDeck());setRoundKey(k=>k+1);
     setFlipped([]);setLocked(false);setGameOver(false);
     setSubmitted(false);setMadeIt(false);setLeaderboard(null);
   }
@@ -722,6 +727,289 @@ function DinoGame({defaultName,onExit}){
   );
 }
 
+// ── Snake game ────────────────────────────────────────────────────────────
+// Drawn as an actual snake (segmented, tapering body, distinct head with
+// eyes + a flicking tongue) and a real little apple for food — not plain
+// colored squares.
+function SnakeGame({defaultName,onExit}){
+  const CELL=15, COLS=20, ROWS=20;
+  const W=CELL*COLS, H=CELL*ROWS;
+  const canvasRef=useRef(null);
+  const rafRef=useRef(null);
+  const stateRef=useRef(null);
+  const [score,setScore]=useState(0);
+  const [gameOver,setGameOver]=useState(false);
+  const [name,setName]=useState(defaultName||"");
+  const [submitting,setSubmitting]=useState(false);
+  const [submitted,setSubmitted]=useState(false);
+  const [madeIt,setMadeIt]=useState(false);
+  const [leaderboard,setLeaderboard]=useState(null);
+
+  function randCell(exclude){
+    let c;
+    do{ c={x:Math.floor(Math.random()*COLS),y:Math.floor(Math.random()*ROWS)}; }
+    while(exclude.some(s=>s.x===c.x&&s.y===c.y));
+    return c;
+  }
+
+  function reset(){
+    const startSnake=[{x:9,y:10},{x:8,y:10},{x:7,y:10}];
+    stateRef.current={
+      snake:startSnake, dir:{x:1,y:0}, nextDir:{x:1,y:0},
+      food:randCell(startSnake), tickMs:150, acc:0,
+      tongueTimer:0, tongueOut:false, running:true
+    };
+    setScore(0); setGameOver(false); setSubmitted(false); setMadeIt(false); setLeaderboard(null);
+  }
+
+  function setDirection(dx,dy){
+    const st=stateRef.current; if(!st||!st.running) return;
+    // ignore reversing straight into the snake's own neck
+    if(st.dir.x===-dx && st.dir.y===-dy) return;
+    st.nextDir={x:dx,y:dy};
+  }
+
+  function drawApple(ctx,cx,cy,r){
+    ctx.save();
+    ctx.fillStyle="#ff2d3d";
+    ctx.beginPath(); ctx.arc(cx,cy+r*0.1,r,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle="#7a4a1e"; ctx.lineWidth=Math.max(1,r*0.25);
+    ctx.beginPath(); ctx.moveTo(cx,cy-r*0.9); ctx.lineTo(cx+r*0.15,cy-r*1.5); ctx.stroke();
+    ctx.fillStyle="#39ff14";
+    ctx.beginPath();
+    ctx.ellipse(cx+r*0.55,cy-r*1.15,r*0.5,r*0.28,-0.5,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawSnake(ctx,snake,dir,tongueOut){
+    const n=snake.length;
+    // body, tail-to-head so the head is drawn last (on top)
+    for(let i=n-1;i>=0;i--){
+      const seg=snake[i];
+      const isHead=i===0;
+      const tailFrac = i>=n-2 ? (n-1-i)/2 : 1; // 0 = very tip of tail, 1 = normal size
+      const size = CELL*(isHead?0.92:0.8+0.14*tailFrac);
+      const off=(CELL-size)/2;
+      const cx=seg.x*CELL+off, cy=seg.y*CELL+off;
+      const scaleShade = i%2===0;
+      const green = isHead ? "#39ff14" : (scaleShade?"#2fe010":"#1f9a0d");
+      ctx.save();
+      ctx.fillStyle=green;
+      if(isHead){ ctx.shadowColor="#39ff14"; ctx.shadowBlur=6; }
+      roundRectPath(ctx,cx,cy,size,size,size*0.4);
+      ctx.fill();
+      ctx.restore();
+    }
+    // head details: eyes + tongue, oriented with travel direction
+    const head=snake[0];
+    const hx=head.x*CELL+CELL/2, hy=head.y*CELL+CELL/2;
+    const ex = dir.x*CELL*0.18, ey = dir.y*CELL*0.18;
+    const perpX = -dir.y*CELL*0.22, perpY = dir.x*CELL*0.22;
+    ctx.fillStyle="#06110a";
+    ctx.beginPath(); ctx.arc(hx+ex+perpX, hy+ey+perpY, CELL*0.09, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(hx+ex-perpX, hy+ey-perpY, CELL*0.09, 0, Math.PI*2); ctx.fill();
+    if(tongueOut){
+      const tx=hx+dir.x*CELL*0.62, ty=hy+dir.y*CELL*0.62;
+      const forkX=dir.y*CELL*0.12, forkY=dir.x*CELL*0.12;
+      ctx.strokeStyle="#ff2d78"; ctx.lineWidth=1.4;
+      ctx.beginPath(); ctx.moveTo(hx+dir.x*CELL*0.46,hy+dir.y*CELL*0.46); ctx.lineTo(tx,ty); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(tx+dir.x*CELL*0.14+forkX, ty+dir.y*CELL*0.14+forkY); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tx,ty); ctx.lineTo(tx+dir.x*CELL*0.14-forkX, ty+dir.y*CELL*0.14-forkY); ctx.stroke();
+    }
+  }
+
+  useEffect(()=>{
+    reset();
+    let last=performance.now();
+    function draw(){
+      const canvas=canvasRef.current; if(!canvas) return;
+      const ctx=canvas.getContext("2d");
+      const st=stateRef.current;
+      ctx.clearRect(0,0,W,H);
+      // subtle checkerboard field so the grid reads clearly
+      for(let y=0;y<ROWS;y++){
+        for(let x=0;x<COLS;x++){
+          ctx.fillStyle=(x+y)%2===0?"rgba(255,255,255,0.02)":"rgba(255,255,255,0.045)";
+          ctx.fillRect(x*CELL,y*CELL,CELL,CELL);
+        }
+      }
+      drawApple(ctx, st.food.x*CELL+CELL/2, st.food.y*CELL+CELL/2, CELL*0.32);
+      drawSnake(ctx, st.snake, st.dir, st.tongueOut);
+    }
+    function loop(now){
+      const dt=now-last; last=now;
+      const st=stateRef.current;
+      if(st.running){
+        st.tongueTimer+=dt;
+        if(st.tongueTimer>1400){ st.tongueOut=true; }
+        if(st.tongueTimer>1650){ st.tongueOut=false; st.tongueTimer=0; }
+
+        st.acc+=dt;
+        if(st.acc>=st.tickMs){
+          st.acc=0;
+          st.dir=st.nextDir;
+          const head=st.snake[0];
+          const newHead={x:head.x+st.dir.x, y:head.y+st.dir.y};
+          const hitWall = newHead.x<0||newHead.x>=COLS||newHead.y<0||newHead.y>=ROWS;
+          const hitSelf = st.snake.some(s=>s.x===newHead.x&&s.y===newHead.y);
+          if(hitWall||hitSelf){
+            st.running=false;
+            setGameOver(true);
+          } else {
+            st.snake.unshift(newHead);
+            if(newHead.x===st.food.x && newHead.y===st.food.y){
+              st.food=randCell(st.snake);
+              st.tickMs=Math.max(70, st.tickMs-3);
+              setScore(s=>s+10);
+            } else {
+              st.snake.pop();
+            }
+          }
+        }
+      }
+      draw();
+      rafRef.current=requestAnimationFrame(loop);
+    }
+    rafRef.current=requestAnimationFrame(loop);
+    return ()=>cancelAnimationFrame(rafRef.current);
+  },[]);
+
+  useEffect(()=>{
+    function onKey(e){
+      const map={ArrowUp:[0,-1],ArrowDown:[0,1],ArrowLeft:[-1,0],ArrowRight:[1,0],
+        KeyW:[0,-1],KeyS:[0,1],KeyA:[-1,0],KeyD:[1,0]};
+      const d=map[e.code];
+      if(d){ e.preventDefault(); setDirection(d[0],d[1]); }
+    }
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[]);
+
+  useEffect(()=>{
+    if(gameOver){
+      window.fbGames.getLeaderboard("snake").then(setLeaderboard).catch(()=>setLeaderboard([]));
+    }
+  },[gameOver]);
+
+  async function saveScore(){
+    if(!name.trim()||submitting||submitted) return;
+    setSubmitting(true);
+    try{
+      const {top5,madeIt:mi} = await window.fbGames.submitScore("snake",name.trim(),score);
+      setLeaderboard(top5);
+      setMadeIt(mi);
+      setSubmitted(true);
+    } catch(e){ console.warn(e); }
+    setSubmitting(false);
+  }
+
+  function playAgain(){ reset(); }
+
+  function DPadBtn({label,dx,dy,style}){
+    return(
+      <button onClick={()=>setDirection(dx,dy)} style={{...style,width:38,height:38,borderRadius:9,
+        border:"1px solid rgba(255,255,255,0.15)",background:"rgba(255,255,255,0.06)",color:"#39ff14",
+        fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>{label}</button>
+    );
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {!gameOver?(
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.4)"}}>ARROWS / WASD TO MOVE</span>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"#39ff14"}}>SCORE <b>{score}</b></span>
+          </div>
+          <div style={{borderRadius:10,overflow:"hidden",border:"1px solid rgba(255,255,255,0.15)",
+            background:"rgba(255,255,255,0.03)",alignSelf:"center"}}>
+            <canvas ref={canvasRef} width={W} height={H} style={{display:"block",width:"min(100%,300px)",height:"auto"}}/>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"38px 38px 38px",gridTemplateRows:"38px 38px",
+            gap:6,justifyContent:"center",margin:"14px 0 4px"}}>
+            <div/><DPadBtn label="▲" dx={0} dy={-1}/><div/>
+            <DPadBtn label="◀" dx={-1} dy={0}/><DPadBtn label="▶" dx={1} dy={0}/>
+            <div/><DPadBtn label="▼" dx={0} dy={1}/><div/>
+          </div>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:6}}>
+            Eat apples to grow — don't hit the walls or yourself!
+          </p>
+        </>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:6,overflowY:"auto"}}>
+          <div style={{fontSize:40,marginBottom:4}}>🐍💥</div>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,color:"#ff2d78"}}>GAME OVER</h3>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:10}}>
+            Final Score: <b style={{color:"#39ff14"}}>{score}</b>
+          </p>
+
+          {!submitted?(
+            <div style={{width:"100%",maxWidth:280,marginBottom:18}}>
+              <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:6,letterSpacing:1}}>SAVE YOUR SCORE</label>
+              <div style={{display:"flex",gap:8}}>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={iStyle(false)}/>
+                <button onClick={saveScore} disabled={!name.trim()||submitting}
+                  style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
+                    cursor:!name.trim()||submitting?"not-allowed":"pointer",
+                    background:!name.trim()||submitting?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                    color:!name.trim()||submitting?"rgba(255,255,255,0.3)":"#000",
+                    fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+                  {submitting?<Spinner/>:"SAVE"}
+                </button>
+              </div>
+            </div>
+          ):(
+            <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:madeIt?"#ffd700":"#39ff14",marginBottom:14}}>
+              {madeIt?"🏆 New Top 5 Leaderboard Entry!":"✅ Score submitted!"}
+            </p>
+          )}
+
+          <div style={{width:"100%",maxWidth:320}}>
+            <h4 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ffd700",marginBottom:10,letterSpacing:1}}>🏆 TOP 5 — SNAKE</h4>
+            {leaderboard===null?(
+              <div style={{display:"flex",justifyContent:"center",padding:20}}><Spinner/></div>
+            ):leaderboard.length===0?(
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.35)"}}>No scores yet — you could be first!</p>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {leaderboard.map((e,i)=>{
+                  const isMe = submitted && e.name===name.trim() && e.score===score;
+                  const medal = i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`;
+                  return(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"8px 12px",borderRadius:8,
+                      background:isMe?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",
+                      border:`1px solid ${isMe?"#ffd70066":"rgba(255,255,255,0.08)"}`}}>
+                      <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,fontWeight:700,color:isMe?"#ffd700":"#fff"}}>{medal} {e.name}</span>
+                      <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"flex",gap:10,marginTop:20}}>
+            <button onClick={playAgain}
+              style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              ↻ PLAY AGAIN
+            </button>
+            <button onClick={onExit}
+              style={{padding:"10px 20px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",cursor:"pointer",
+                background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              EXIT
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeaderboardOnly({gameId,title,onPlay}){
   const [leaderboard,setLeaderboard]=useState(null);
   useEffect(()=>{
@@ -775,6 +1063,7 @@ function ComingSoonBoard(){
 const GAME_META = {
   memory: {title:"Memory Match", icon:"🧠", leaderboardId:"memoryMatch"},
   dino:   {title:"Dino Runner",  icon:"🦖", leaderboardId:"dino"},
+  snake:  {title:"Snake",        icon:"🐍", leaderboardId:"snake"},
 };
 
 function GameModal({gameId,initialMode,defaultName,onClose}){
@@ -803,7 +1092,9 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
             ?<LeaderboardOnly gameId={meta.leaderboardId} title={meta.title} onPlay={()=>setMode("play")}/>
             :gameId==="dino"
               ?<DinoGame defaultName={defaultName} onExit={onClose}/>
-              :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
+              :gameId==="snake"
+                ?<SnakeGame defaultName={defaultName} onExit={onClose}/>
+                :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
           }
         </div>
       </Glass>
@@ -816,7 +1107,7 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
 const GAMES_LIST = [
   {id:"memory",name:"Memory Match",icon:"🧠",desc:"Flip cards, find pairs, don't run out of hearts.",active:true},
   {id:"dino",name:"Dino Runner",icon:"🦖",desc:"Jump the cacti in this classic offline runner.",active:true},
-  {id:"comingsoon",name:"Coming Soon",icon:"🚧",desc:"A new game is on the way — stay tuned!",active:false},
+  {id:"snake",name:"Snake",icon:"🐍",desc:"Eat apples, grow longer, don't hit the walls or yourself!",active:true},
 ];
 
 function GamesTab({isAdmin,studentUsername}){
@@ -910,21 +1201,7 @@ function GamesTab({isAdmin,studentUsername}){
       )}
 
       {modal&&(
-        modal.gameId==="comingsoon"
-          ?ReactDOM.createPortal(
-              <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(2,2,6,0.85)",backdropFilter:"blur(6px)",
-                display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-                <Glass style={{width:"100%",maxWidth:400,padding:"26px",position:"relative",borderColor:"#ffd70033"}}>
-                  <button onClick={()=>setModal(null)}
-                    style={{position:"absolute",top:14,right:14,background:"rgba(255,255,255,0.08)",
-                      border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",
-                      width:30,height:30,cursor:"pointer",fontSize:15}}>✕</button>
-                  <ComingSoonBoard/>
-                </Glass>
-              </div>,
-              document.body
-            )
-          :<GameModal gameId={modal.gameId} initialMode={modal.mode} defaultName={studentUsername||""} onClose={()=>setModal(null)}/>
+        <GameModal gameId={modal.gameId} initialMode={modal.mode} defaultName={studentUsername||""} onClose={()=>setModal(null)}/>
       )}
     </div>
   );
