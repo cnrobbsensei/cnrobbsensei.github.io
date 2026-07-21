@@ -399,6 +399,16 @@
       }
       sessionStorage.clear();
       window.location.href = "index.html" + (reason ? ("?reason="+reason) : "");
+    },
+
+    // Lets an admin immediately end a specific ninja's active session from
+    // another device (e.g. "In The Dojo"). Frees up their login slot right
+    // away, and sets a flag the ninja's own tab picks up within ~20s to log
+    // them out automatically.
+    async endSession(accountKey){
+      if(!accountKey) return;
+      try{ await db.ref(`activeSessions/${accountKey}`).remove(); }catch(e){}
+      try{ await db.ref(`forcedLogouts/${accountKey}`).set(Date.now()); }catch(e){}
     }
   };
 
@@ -424,6 +434,14 @@
           try{
             const banned = await window.fbModeration.isBanned(s.accountKey);
             if(banned){ window.cnSession.logout("inappropriate"); return; }
+          }catch(e){}
+          try{
+            const forced = await db.ref(`forcedLogouts/${s.accountKey}`).once("value");
+            if(forced.exists()){
+              try{ await db.ref(`forcedLogouts/${s.accountKey}`).remove(); }catch(e2){}
+              window.cnSession.logout("session_ended");
+              return;
+            }
           }catch(e){}
         }
       }, 20000);
