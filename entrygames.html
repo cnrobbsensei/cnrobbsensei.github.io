@@ -317,7 +317,7 @@ function EnterScores({allEntries,setAllEntries,setToast}){
     else if(p<0) errs.pts="No negative points!";
     if(Object.keys(errs).length){setErrors(errs);return;}
     setErrors({});setSaving(true);
-    const normName = window.cnNormalizeName(name);
+    const normName = window.cnNormalizeName ? window.cnNormalizeName(name) : name.trim();
     try{
       const result=await window.fbLeaderboard.addEntry(cw,normName,p,today);
       const newEntry={id:result.id,week:cw,name:normName,points:p,date:today,createdAt:Date.now()};
