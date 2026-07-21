@@ -187,8 +187,9 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
   // always reflects who can currently sign in.
   const map = {};
   todayEntries.forEach(e=>{
-    const key = e.name.trim();
-    if(!map[key]) map[key]={name:key,points:0,attempts:0,lastSeen:0};
+    const key = e.name.trim().toLowerCase();
+    if(!map[key]) map[key]={name:e.name.trim(),points:0,attempts:0,lastSeen:0};
+    map[key].name = e.name.trim(); // keep most-recent casing for display
     map[key].points += e.points;
     map[key].attempts += 1;
     map[key].lastSeen = Math.max(map[key].lastSeen, e.createdAt||0);
@@ -210,6 +211,21 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
       await onBreakChanged();
     } catch(e){ console.warn(e); alert("Something went wrong updating break status. Please try again."); }
     setTogglingAccount(null);
+  }
+
+  const [endingAccount,setEndingAccount]=useState(null);
+  async function handleEndSession(account){
+    if(!account || endingAccount) return;
+    if(!window.confirm(`End ${account}'s session now? They'll be signed out immediately and can log back in right away if they still have access.`)) return;
+    const pw = window.prompt(`Enter Sensei password to end the session for ${account}:`);
+    if(pw===null) return;
+    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
+    setEndingAccount(account);
+    try{
+      await window.cnSession.endSession(window.cnKeySafe(account));
+      await onRefresh();
+    } catch(e){ console.warn(e); alert("Something went wrong ending the session. Please try again."); }
+    setEndingAccount(null);
   }
 
   return(
@@ -290,15 +306,27 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
                   🔑 login access: {accessRemainingMin}m left
                 </div>
                 {isAdmin&&(
-                  <button onClick={()=>handleBreakToggle(account,onBreak)}
-                    disabled={!account||togglingAccount===account}
-                    style={{width:"100%",padding:"8px",borderRadius:8,border:"none",
-                      cursor:(!account||togglingAccount===account)?"not-allowed":"pointer",
-                      background:!account?"rgba(255,255,255,0.06)":onBreak?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#39ff14,#00cfff)",
-                      color:!account?"rgba(255,255,255,0.3)":"#000",
-                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
-                    {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?`⏹ End Break (${remainingMin}m left)`:"▶ Start Break"}
-                  </button>
+                  <>
+                    <button onClick={()=>handleBreakToggle(account,onBreak)}
+                      disabled={!account||togglingAccount===account}
+                      style={{width:"100%",padding:"8px",borderRadius:8,border:"none",
+                        cursor:(!account||togglingAccount===account)?"not-allowed":"pointer",
+                        background:!account?"rgba(255,255,255,0.06)":onBreak?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                        color:!account?"rgba(255,255,255,0.3)":"#000",
+                        fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5,marginBottom:8}}>
+                      {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?`⏹ End Break (${remainingMin}m left)`:"▶ Start Break"}
+                    </button>
+                    <button onClick={()=>handleEndSession(account)}
+                      disabled={!account||endingAccount===account}
+                      style={{width:"100%",padding:"8px",borderRadius:8,
+                        border:!account?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,45,120,0.4)",
+                        cursor:(!account||endingAccount===account)?"not-allowed":"pointer",
+                        background:!account?"rgba(255,255,255,0.03)":"rgba(255,45,120,0.1)",
+                        color:!account?"rgba(255,255,255,0.25)":"#ff2d78",
+                        fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
+                      {endingAccount===account?"...":!account?"⛔ No Account Linked":"⛔ End Session"}
+                    </button>
+                  </>
                 )}
               </Glass>
             );
