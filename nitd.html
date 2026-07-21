@@ -216,6 +216,10 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
   const [endingAccount,setEndingAccount]=useState(null);
   async function handleEndSession(account){
     if(!account || endingAccount) return;
+    if(!window.cnSession || typeof window.cnSession.endSession !== "function"){
+      alert("This site's shared.js is out of date and doesn't have the End Session feature yet — please update shared.js (and reload) and try again.");
+      return;
+    }
     if(!window.confirm(`End ${account}'s session now? They'll be signed out immediately and can log back in right away if they still have access.`)) return;
     const pw = window.prompt(`Enter Sensei password to end the session for ${account}:`);
     if(pw===null) return;
@@ -224,7 +228,7 @@ function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshin
     try{
       await window.cnSession.endSession(window.cnKeySafe(account));
       await onRefresh();
-    } catch(e){ console.warn(e); alert("Something went wrong ending the session. Please try again."); }
+    } catch(e){ console.warn(e); alert("Something went wrong ending the session: "+(e&&e.message?e.message:e)); }
     setEndingAccount(null);
   }
 
