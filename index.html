@@ -125,6 +125,7 @@ function LoginScreen({onLogin}){
     const reason = params.get("reason");
     if(reason==="expired") setHint("You were signed out — your 2-hour Points access window closed.");
     else if(reason==="logged_out_elsewhere") setHint("You were signed out because your account was logged in elsewhere.");
+    else if(reason==="session_ended") setHint("Your Sensei ended your session. Ask them if you need to log back in.");
   },[]);
 
   async function attempt(){
