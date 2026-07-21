@@ -47,6 +47,15 @@
     return String(str).trim().toLowerCase().replace(/[.#$\[\]]/g,"_");
   };
 
+  // Normalizes a typed name to one canonical casing (e.g. "JOHN", "john",
+  // "JoHn" all become "John") so the same ninja never gets split into
+  // separate leaderboard rows just because someone typed the name differently.
+  window.cnNormalizeName = function(str){
+    const trimmed = String(str||"").trim().replace(/\s+/g," ");
+    if(!trimmed) return trimmed;
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+  };
+
   // -------------------------------------------------------------------------
   // Points (formerly "Ring Toss") data layer
   // -------------------------------------------------------------------------
