@@ -1013,6 +1013,262 @@ function SnakeGame({defaultName,onExit}){
   );
 }
 
+// ── Minesweeper (endless) ────────────────────────────────────────────────
+// Classic reveal-the-safe-tiles mechanic: +20 points per safe tile cleared,
+// touching a mine ends the run instantly. Clearing a whole board rolls
+// straight into a fresh, slightly harder one — no "you win" screen, it just
+// keeps going (endless) until a mine is hit.
+function MinesweeperGame({defaultName,onExit}){
+  const ROWS=9, COLS=9, CELL=28, BASE_MINES=10;
+
+  function mineCountForLevel(lv){ return Math.min(24, BASE_MINES + (lv-1)*2); }
+  function makeEmptyBoard(){
+    return Array.from({length:ROWS},()=>Array.from({length:COLS},()=>({mine:false,revealed:false,flagged:false,adj:0})));
+  }
+
+  const [level,setLevel]=useState(1);
+  const [board,setBoard]=useState(()=>makeEmptyBoard());
+  const [placed,setPlaced]=useState(false);
+  const [score,setScore]=useState(0);
+  const [gameOver,setGameOver]=useState(false);
+  const [flagMode,setFlagMode]=useState(false);
+  const [name,setName]=useState(defaultName||"");
+  const [submitting,setSubmitting]=useState(false);
+  const [submitted,setSubmitted]=useState(false);
+  const [madeIt,setMadeIt]=useState(false);
+  const [leaderboard,setLeaderboard]=useState(null);
+
+  function resetGame(){
+    setLevel(1); setBoard(makeEmptyBoard()); setPlaced(false); setScore(0); setGameOver(false);
+    setSubmitted(false); setMadeIt(false); setLeaderboard(null);
+  }
+  function nextLevel(fromLevel){
+    setLevel(fromLevel+1); setBoard(makeEmptyBoard()); setPlaced(false);
+  }
+
+  function placeMinesAvoiding(b, er, ec, lv){
+    const forbidden = new Set();
+    for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+      const rr=er+dr, cc=ec+dc;
+      if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS) forbidden.add(rr+"_"+cc);
+    }
+    const count = mineCountForLevel(lv);
+    const nb = b.map(row=>row.map(c=>({...c})));
+    let placedCount=0, guard=0;
+    while(placedCount<count && guard<5000){
+      guard++;
+      const r=Math.floor(Math.random()*ROWS), c=Math.floor(Math.random()*COLS);
+      if(forbidden.has(r+"_"+c) || nb[r][c].mine) continue;
+      nb[r][c].mine=true; placedCount++;
+    }
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+      if(nb[r][c].mine){ nb[r][c].adj=-1; continue; }
+      let n=0;
+      for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+        const rr=r+dr, cc=c+dc;
+        if(rr>=0&&rr<ROWS&&cc>=0&&cc<COLS&&nb[rr][cc].mine) n++;
+      }
+      nb[r][c].adj=n;
+    }
+    return nb;
+  }
+
+  function floodReveal(b, sr, sc){
+    const nb = b.map(row=>row.map(c=>({...c})));
+    const stack=[[sr,sc]]; const seen=new Set(); let revealedCount=0;
+    while(stack.length){
+      const [r,c]=stack.pop();
+      const key=r+"_"+c;
+      if(seen.has(key)) continue;
+      seen.add(key);
+      if(r<0||r>=ROWS||c<0||c>=COLS) continue;
+      const cell=nb[r][c];
+      if(cell.revealed||cell.flagged||cell.mine) continue;
+      cell.revealed=true; revealedCount++;
+      if(cell.adj===0){
+        for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){
+          if(dr!==0||dc!==0) stack.push([r+dr,c+dc]);
+        }
+      }
+    }
+    return {board:nb, revealedCount};
+  }
+
+  function handleReveal(r,c){
+    if(gameOver) return;
+    if(board[r][c].flagged) return;
+    let curBoard = board;
+    if(!placed){
+      curBoard = placeMinesAvoiding(board, r, c, level);
+      setPlaced(true);
+    }
+    if(curBoard[r][c].mine){
+      const revealedAll = curBoard.map(row=>row.map(cc=>cc.mine?{...cc,revealed:true,hit:cc===curBoard[r][c]}:cc));
+      // mark the exact tile that was touched so it renders distinctly
+      const finalBoard = revealedAll.map((row,ri)=>row.map((cc,ci)=>({...cc, hit: ri===r&&ci===c})));
+      setBoard(finalBoard);
+      setGameOver(true);
+      return;
+    }
+    const {board:afterReveal, revealedCount} = floodReveal(curBoard, r, c);
+    setBoard(afterReveal);
+    setScore(s=>s+revealedCount*20);
+    const cleared = afterReveal.every(row=>row.every(cc=>cc.mine||cc.revealed));
+    if(cleared){
+      const lv=level;
+      setTimeout(()=>nextLevel(lv),550);
+    }
+  }
+
+  function handleFlag(r,c,e){
+    if(e) e.preventDefault();
+    if(gameOver) return;
+    setBoard(b=>{
+      const nb=b.map(row=>row.map(cc=>({...cc})));
+      const cell=nb[r][c];
+      if(!cell.revealed) cell.flagged=!cell.flagged;
+      return nb;
+    });
+  }
+
+  function onCellClick(r,c){ flagMode ? handleFlag(r,c) : handleReveal(r,c); }
+
+  useEffect(()=>{
+    if(gameOver){
+      window.fbGames.getLeaderboard("minesweeper").then(setLeaderboard).catch(()=>setLeaderboard([]));
+    }
+  },[gameOver]);
+
+  async function saveScore(){
+    if(!name.trim()||submitting||submitted) return;
+    setSubmitting(true);
+    try{
+      const {top5,madeIt:mi} = await window.fbGames.submitScore("minesweeper",name.trim(),score);
+      setLeaderboard(top5);
+      setMadeIt(mi);
+      setSubmitted(true);
+    } catch(e){ console.warn(e); }
+    setSubmitting(false);
+  }
+
+  const numColors={1:"#5ea1ff",2:"#39ff14",3:"#ff5252",4:"#c26bff",5:"#ffab40",6:"#2ce6d9",7:"#fff",8:"#9aa0a6"};
+  const flagsPlaced = board.flat().filter(c=>c.flagged).length;
+  const minesLeft = Math.max(0, mineCountForLevel(level)-flagsPlaced);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      {!gameOver?(
+        <>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,flexWrap:"wrap",gap:6}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.4)"}}>LEVEL {level} · 💣 {minesLeft} LEFT</span>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"#39ff14"}}>SCORE <b>{score}</b></span>
+          </div>
+          <div style={{display:"flex",justifyContent:"center",marginBottom:10}}>
+            <button onClick={()=>setFlagMode(f=>!f)}
+              style={{padding:"7px 16px",borderRadius:99,border:`1px solid ${flagMode?"#ffd700aa":"rgba(255,255,255,0.15)"}`,
+                background:flagMode?"rgba(255,215,0,0.15)":"rgba(255,255,255,0.05)",
+                color:flagMode?"#ffd700":"rgba(255,255,255,0.6)",cursor:"pointer",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:1}}>
+              {flagMode?"🚩 FLAG MODE ON":"👆 TAP TO FLAG INSTEAD"}
+            </button>
+          </div>
+          <div style={{alignSelf:"center",display:"grid",gridTemplateColumns:`repeat(${COLS},${CELL}px)`,gridTemplateRows:`repeat(${ROWS},${CELL}px)`,
+            gap:2,padding:6,borderRadius:10,background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.12)"}}>
+            {board.map((row,r)=>row.map((cell,c)=>{
+              const isNum = cell.revealed && !cell.mine && cell.adj>0;
+              return(
+                <button key={r+"_"+c} onClick={()=>onCellClick(r,c)} onContextMenu={(e)=>handleFlag(r,c,e)}
+                  style={{width:CELL,height:CELL,borderRadius:5,cursor:"pointer",
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontFamily:"'Orbitron',sans-serif",fontWeight:800,fontSize:12,
+                    border:cell.revealed?"1px solid rgba(255,255,255,0.06)":"1px solid rgba(255,255,255,0.18)",
+                    background:cell.revealed?(cell.mine?"rgba(255,45,120,0.25)":"rgba(255,255,255,0.03)"):"rgba(255,255,255,0.09)",
+                    color:isNum?numColors[cell.adj]:"#fff"}}>
+                  {cell.revealed
+                    ? (cell.mine ? "💣" : (cell.adj>0?cell.adj:""))
+                    : (cell.flagged ? "🚩" : "")}
+                </button>
+              );
+            }))}
+          </div>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)",textAlign:"center",marginTop:10}}>
+            Tap a tile to clear it (+20 pts). Right-click, or toggle Flag Mode, to mark suspected mines.
+          </p>
+        </>
+      ):(
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:6,overflowY:"auto"}}>
+          <div style={{fontSize:40,marginBottom:4}}>💥🚩</div>
+          <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,color:"#ff2d78"}}>GAME OVER</h3>
+          <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.5)",marginBottom:10}}>
+            Final Score: <b style={{color:"#39ff14"}}>{score}</b> · Reached Level {level}
+          </p>
+
+          {!submitted?(
+            <div style={{width:"100%",maxWidth:280,marginBottom:18}}>
+              <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:6,letterSpacing:1}}>SAVE YOUR SCORE</label>
+              <div style={{display:"flex",gap:8}}>
+                <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={iStyle(false)}/>
+                <button onClick={saveScore} disabled={!name.trim()||submitting}
+                  style={{flexShrink:0,padding:"10px 16px",borderRadius:10,border:"none",
+                    cursor:!name.trim()||submitting?"not-allowed":"pointer",
+                    background:!name.trim()||submitting?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                    color:!name.trim()||submitting?"rgba(255,255,255,0.3)":"#000",
+                    fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+                  {submitting?<Spinner/>:"SAVE"}
+                </button>
+              </div>
+            </div>
+          ):(
+            <p style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:madeIt?"#ffd700":"#39ff14",marginBottom:14}}>
+              {madeIt?"🏆 New Top 5 Leaderboard Entry!":"✅ Score submitted!"}
+            </p>
+          )}
+
+          <div style={{width:"100%",maxWidth:320}}>
+            <h4 style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#ffd700",marginBottom:10,letterSpacing:1}}>🏆 TOP 5 — MINESWEEPER</h4>
+            {leaderboard===null?(
+              <div style={{display:"flex",justifyContent:"center",padding:20}}><Spinner/></div>
+            ):leaderboard.length===0?(
+              <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.35)"}}>No scores yet — you could be first!</p>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {leaderboard.map((e,i)=>{
+                  const isMe = submitted && e.name===name.trim() && e.score===score;
+                  const medal = i===0?"👑":i===1?"🥈":i===2?"🥉":`#${i+1}`;
+                  return(
+                    <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"8px 12px",borderRadius:8,
+                      background:isMe?"rgba(255,215,0,0.12)":"rgba(255,255,255,0.04)",
+                      border:`1px solid ${isMe?"#ffd70066":"rgba(255,255,255,0.08)"}`}}>
+                      <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,fontWeight:700,color:isMe?"#ffd700":"#fff"}}>{medal} {e.name}</span>
+                      <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{display:"flex",gap:10,marginTop:20}}>
+            <button onClick={resetGame}
+              style={{padding:"10px 20px",borderRadius:10,border:"none",cursor:"pointer",
+                background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              ↻ PLAY AGAIN
+            </button>
+            <button onClick={onExit}
+              style={{padding:"10px 20px",borderRadius:10,border:"1px solid rgba(255,255,255,0.2)",cursor:"pointer",
+                background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",
+                fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+              EXIT
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LeaderboardOnly({gameId,title,onPlay}){
   const [leaderboard,setLeaderboard]=useState(null);
   useEffect(()=>{
@@ -1062,21 +1318,65 @@ function ComingSoonBoard(){
   );
 }
 
+function InstructionsView({icon,title,steps,onPlay}){
+  return(
+    <div style={{display:"flex",flexDirection:"column",alignItems:"center",textAlign:"center",gap:14}}>
+      <div style={{fontSize:36}}>{icon}</div>
+      <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#00cfff"}}>How to play {title}</h3>
+      <div style={{width:"100%",maxWidth:340,display:"flex",flexDirection:"column",gap:10,textAlign:"left"}}>
+        {steps.map((s,i)=>(
+          <div key={i} style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+            <div style={{flexShrink:0,width:22,height:22,borderRadius:7,background:"rgba(0,207,255,0.12)",
+              border:"1px solid rgba(0,207,255,0.3)",display:"flex",alignItems:"center",justifyContent:"center",
+              fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,color:"#00cfff"}}>{i+1}</div>
+            <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12.5,color:"rgba(255,255,255,0.7)",lineHeight:1.55,margin:0}}>{s}</p>
+          </div>
+        ))}
+      </div>
+      <button onClick={onPlay}
+        style={{marginTop:6,padding:"11px 26px",borderRadius:99,border:"none",cursor:"pointer",
+          background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
+          fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1}}>
+        ▶ PLAY NOW
+      </button>
+    </div>
+  );
+}
+
 // gameId (used in GAMES_LIST/hub) -> display + leaderboard metadata
 const GAME_META = {
-  memory: {title:"Memory Match", icon:"🧠", leaderboardId:"memoryMatch"},
-  dino:   {title:"Dino Runner",  icon:"🦖", leaderboardId:"dino"},
-  snake:  {title:"Snake",        icon:"🐍", leaderboardId:"snake"},
+  memory: {title:"Memory Match", icon:"🧠", leaderboardId:"memoryMatch", steps:[
+    "All cards flip face-up for a few seconds at the start of every round — memorize where things are!",
+    "Tap two cards to flip them. Match them and they stay face-up; get it wrong and both flip back down.",
+    "You have 3 hearts ❤️ — a wrong guess costs one heart. Run out of hearts and it's game over.",
+    "Clear every pair to advance to the next round and keep your score climbing."
+  ]},
+  dino: {title:"Dino Runner", icon:"🦖", leaderboardId:"dino", steps:[
+    "Press Space, tap, or click to jump over the cacti.",
+    "The longer you survive, the faster (and more frequent) the obstacles come.",
+    "One hit and it's game over — your score is based on how far you ran."
+  ]},
+  snake: {title:"Snake", icon:"🐍", leaderboardId:"snake", steps:[
+    "Use the arrow keys, WASD, or the on-screen D-pad to steer.",
+    "Eat apples 🍎 to grow longer and earn points — the snake speeds up the more you eat.",
+    "Don't run into the walls or your own tail, or it's game over."
+  ]},
+  minesweeper: {title:"Minesweeper", icon:"💣", leaderboardId:"minesweeper", steps:[
+    "Tap a tile to clear it — every safely-cleared tile is worth 20 points.",
+    "A number tells you how many mines are hiding in the 8 tiles touching it — use that to figure out where mines are.",
+    "Touch a mine and it's game over instantly, so toggle Flag Mode (or right-click on a computer) to mark 🚩 tiles you suspect are mines.",
+    "Clear every safe tile on the board and a brand-new, slightly trickier board appears automatically — it's endless, so see how high you can push your score!"
+  ]},
 };
 
 function GameModal({gameId,initialMode,defaultName,onClose}){
-  const [mode,setMode]=useState(initialMode); // 'play' | 'leaderboard'
+  const [mode,setMode]=useState(initialMode); // 'play' | 'leaderboard' | 'instructions'
   useEffect(()=>{
     function onKey(e){ if(e.key==="Escape") onClose(); }
     window.addEventListener("keydown",onKey);
     return ()=>window.removeEventListener("keydown",onKey);
   },[]);
-  const meta = GAME_META[gameId] || {title:"Game",icon:"🎮",leaderboardId:gameId};
+  const meta = GAME_META[gameId] || {title:"Game",icon:"🎮",leaderboardId:gameId,steps:[]};
   return ReactDOM.createPortal(
     <div style={{position:"fixed",inset:0,zIndex:500,background:"rgba(2,2,6,0.85)",backdropFilter:"blur(6px)",
       display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
@@ -1093,11 +1393,15 @@ function GameModal({gameId,initialMode,defaultName,onClose}){
         <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column"}}>
           {mode==="leaderboard"
             ?<LeaderboardOnly gameId={meta.leaderboardId} title={meta.title} onPlay={()=>setMode("play")}/>
-            :gameId==="dino"
-              ?<DinoGame defaultName={defaultName} onExit={onClose}/>
-              :gameId==="snake"
-                ?<SnakeGame defaultName={defaultName} onExit={onClose}/>
-                :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
+            :mode==="instructions"
+              ?<InstructionsView icon={meta.icon} title={meta.title} steps={meta.steps||[]} onPlay={()=>setMode("play")}/>
+              :gameId==="dino"
+                ?<DinoGame defaultName={defaultName} onExit={onClose}/>
+                :gameId==="snake"
+                  ?<SnakeGame defaultName={defaultName} onExit={onClose}/>
+                  :gameId==="minesweeper"
+                    ?<MinesweeperGame defaultName={defaultName} onExit={onClose}/>
+                    :<MemoryMatchGame defaultName={defaultName} onExit={onClose}/>
           }
         </div>
       </Glass>
@@ -1111,6 +1415,7 @@ const GAMES_LIST = [
   {id:"memory",name:"Memory Match",icon:"🧠",desc:"Flip cards, find pairs, don't run out of hearts.",active:true},
   {id:"dino",name:"Dino Runner",icon:"🦖",desc:"Jump the cacti in this classic offline runner.",active:true},
   {id:"snake",name:"Snake",icon:"🐍",desc:"Eat apples, grow longer, don't hit the walls or yourself!",active:true},
+  {id:"minesweeper",name:"Minesweeper",icon:"💣",desc:"Clear safe tiles for points — one wrong tap ends it instantly!",active:true},
 ];
 
 function GamesTab({isAdmin,studentUsername}){
@@ -1181,15 +1486,19 @@ function GamesTab({isAdmin,studentUsername}){
                 {g.desc}
               </p>
               {g.active?(
-                <div style={{display:"flex",gap:8}}>
+                <div style={{display:"flex",gap:6}}>
                   <button onClick={()=>setModal({gameId:g.id,mode:"play"})}
-                    style={{flex:1,padding:"9px",borderRadius:9,border:"none",cursor:"pointer",
+                    style={{flex:1,padding:"9px 6px",borderRadius:9,border:"none",cursor:"pointer",
                       background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
-                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>▶ PLAY</button>
+                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10.5}}>▶ PLAY</button>
                   <button onClick={()=>setModal({gameId:g.id,mode:"leaderboard"})}
-                    style={{flex:1,padding:"9px",borderRadius:9,border:"1px solid #ffd70044",cursor:"pointer",
+                    style={{flexShrink:0,padding:"9px 10px",borderRadius:9,border:"1px solid #ffd70044",cursor:"pointer",
                       background:"rgba(255,215,0,0.1)",color:"#ffd700",
                       fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>🏆</button>
+                  <button onClick={()=>setModal({gameId:g.id,mode:"instructions"})}
+                    style={{flexShrink:0,padding:"9px 10px",borderRadius:9,border:"1px solid #00cfff44",cursor:"pointer",
+                      background:"rgba(0,207,255,0.1)",color:"#00cfff",
+                      fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>📖</button>
                 </div>
               ):(
                 <button onClick={()=>setModal({gameId:g.id,mode:"play"})}
