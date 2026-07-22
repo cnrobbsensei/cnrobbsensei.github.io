@@ -42,6 +42,7 @@ function isInputWindowOpen(){ return true; }
 function groupEntries(entries){
   const map = {};
   for(const e of entries){
+    if(!e || !e.name) continue; // skip malformed entries instead of crashing
     // Group case-insensitively so "john", "John", and "JOHN" are the same ninja —
     // the displayed name uses whichever casing was typed most recently.
     const nameKey = e.name.trim().toLowerCase();
@@ -56,6 +57,7 @@ function groupEntries(entries){
 }
 function getAttemptsToday(allEntries, name, week, date){
   return allEntries.filter(e =>
+    e && e.name &&
     e.week === week &&
     e.name.toLowerCase() === name.trim().toLowerCase() &&
     e.date === date
@@ -69,6 +71,7 @@ function calcBoard(groupedForWeek){
 function calcNinjaSummary(groupedForWeek){
   const map = {};
   for(const e of groupedForWeek){
+    if(!e || !e.name) continue;
     const nameKey = e.name.trim().toLowerCase();
     if(!map[nameKey]) map[nameKey]={name:e.name,total:0,days:[]};
     map[nameKey].name = e.name; // keep most-recent casing for display
