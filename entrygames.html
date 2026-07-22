@@ -286,27 +286,100 @@ function LeaderboardView({allEntries}){
   );
 }
 
+// Modal shown when a typed first name matches more than one registered
+// username (e.g. two "arjun"s) — makes the admin pick the right account
+// before the score is actually saved.
+function PersonPickerModal({matches,onSelect,onCancel,busy}){
+  return(
+    <div onClick={onCancel} style={{position:"fixed",inset:0,zIndex:500,display:"flex",alignItems:"center",justifyContent:"center",
+      background:"rgba(0,0,0,0.7)",backdropFilter:"blur(4px)",WebkitBackdropFilter:"blur(4px)",padding:16}}>
+      <Glass onClick={e=>e.stopPropagation()} style={{padding:24,maxWidth:360,width:"100%",animation:"fadeUp .25s ease both"}}>
+        <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,color:"#fff",marginBottom:6}}>Which person is this?</h3>
+        <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginBottom:16,lineHeight:1.5}}>
+          Multiple registered ninjas share that first name — pick the right account.
+        </p>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          {matches.map(u=>(
+            <div key={u} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,
+              background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.12)",borderRadius:10,padding:"10px 12px 10px 14px"}}>
+              <span style={{fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{u}</span>
+              <button disabled={busy} onClick={()=>onSelect(u)} style={{flexShrink:0,padding:"7px 16px",borderRadius:8,border:"none",
+                cursor:busy?"not-allowed":"pointer",background:busy?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+                color:busy?"rgba(255,255,255,0.3)":"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11}}>
+                {busy?<Spinner/>:"Select"}
+              </button>
+            </div>
+          ))}
+        </div>
+        <button onClick={onCancel} disabled={busy} style={{width:"100%",padding:10,borderRadius:9,border:"1px solid rgba(255,255,255,0.15)",
+          background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.5)",cursor:busy?"not-allowed":"pointer",
+          fontFamily:"'Fira Code',monospace",fontSize:11,letterSpacing:1}}>CANCEL</button>
+      </Glass>
+    </div>
+  );
+}
+
 function EnterScores({allEntries,setAllEntries,setToast}){
   const [name,setName]=useState("");
   const [pts,setPts]=useState("");
   const [errors,setErrors]=useState({});
   const [saving,setSaving]=useState(false);
   const [deleting,setDeleting]=useState(null);
+  const [usernames,setUsernames]=useState([]);
+  const [pendingChoice,setPendingChoice]=useState(null); // {matches:[...], pts:number}
   const inputOpen=isInputWindowOpen();
   const cw=window.getCurrentWeek();
   const today=window.todayStr();
 
+  useEffect(()=>{
+    (async()=>{
+      try{ setUsernames(await window.fbUsernames.getAll()); }catch(e){console.warn(e);}
+    })();
+  },[]);
+
+  function firstNameOf(u){ return String(u||"").split(".")[0].trim().toLowerCase(); }
+
   const weekEntries=allEntries.filter(e=>e.week===cw);
   const grouped=groupEntries(weekEntries);
   const board=calcNinjaSummary(grouped);
-  const ninjaGrouped=name.trim()?grouped.filter(e=>e.name.toLowerCase()===name.trim().toLowerCase()):[];
-  const ninjaSummary=board.find(n=>n.name.toLowerCase()===name.trim().toLowerCase());
-  const ninjaRank=board.findIndex(n=>n.name.toLowerCase()===name.trim().toLowerCase())+1;
 
-  const attemptsToday=name.trim()?getAttemptsToday(allEntries,name.trim(),cw,today):0;
+  // Figure out whether the typed name corresponds to exactly one registered
+  // username (e.g. "juilee" -> "juilee.kadam"), several (ambiguous — needs a
+  // prompt), or none (ninja isn't registered yet — fall back to the typed name).
+  const typedTrim=name.trim();
+  const typedLower=typedTrim.toLowerCase();
+  const exactUsernameMatch=typedTrim?usernames.find(u=>u.toLowerCase()===typedLower):null;
+  const candidateMatches=typedTrim&&!exactUsernameMatch?usernames.filter(u=>firstNameOf(u)===typedLower.split(".")[0]):[];
+  const isAmbiguous=!exactUsernameMatch&&candidateMatches.length>1;
+  const resolvedName=exactUsernameMatch||(candidateMatches.length===1?candidateMatches[0]:typedTrim);
+  // Only use the resolved name to look up existing data when it's unambiguous —
+  // with 2+ possible accounts we don't know whose stats to show yet.
+  const previewName=typedTrim&&!isAmbiguous?resolvedName:"";
+
+  const ninjaGrouped=previewName?grouped.filter(e=>e.name.toLowerCase()===previewName.toLowerCase()):[];
+  const ninjaSummary=board.find(n=>n.name.toLowerCase()===previewName.toLowerCase());
+  const ninjaRank=board.findIndex(n=>n.name.toLowerCase()===previewName.toLowerCase())+1;
+
+  const attemptsToday=previewName?getAttemptsToday(allEntries,previewName,cw,today):0;
   const attemptsLeft=Math.max(0,MAX_ATTEMPTS_PER_DAY-attemptsToday);
   const maxedOut=attemptsToday>=MAX_ATTEMPTS_PER_DAY;
   const barColor=attemptsLeft===0?"#ff2d78":attemptsLeft===1?"#ffd700":"#39ff14";
+
+  async function doSubmit(rawName,p){
+    setSaving(true);
+    const normName = window.cnNormalizeName ? window.cnNormalizeName(rawName) : rawName.trim();
+    const priorAttempts = getAttemptsToday(allEntries,normName,cw,today);
+    try{
+      const result=await window.fbLeaderboard.addEntry(cw,normName,p,today);
+      const newEntry={id:result.id,week:cw,name:normName,points:p,date:today,createdAt:Date.now()};
+      setAllEntries(prev=>[...prev,newEntry]);
+      setPts("");
+      setPendingChoice(null);
+      const rem=MAX_ATTEMPTS_PER_DAY-(priorAttempts+1);
+      setToast({msg:rem>0?`${normName} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${window.SESSION_HOURS}h`:`${normName} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
+    } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
+    setSaving(false);
+  }
 
   async function submit(){
     if(!inputOpen||maxedOut) return;
@@ -316,17 +389,12 @@ function EnterScores({allEntries,setAllEntries,setToast}){
     if(!pts||isNaN(p)) errs.pts="Must be a number";
     else if(p<0) errs.pts="No negative points!";
     if(Object.keys(errs).length){setErrors(errs);return;}
-    setErrors({});setSaving(true);
-    const normName = window.cnNormalizeName ? window.cnNormalizeName(name) : name.trim();
-    try{
-      const result=await window.fbLeaderboard.addEntry(cw,normName,p,today);
-      const newEntry={id:result.id,week:cw,name:normName,points:p,date:today,createdAt:Date.now()};
-      setAllEntries(prev=>[...prev,newEntry]);
-      setPts("");
-      const rem=MAX_ATTEMPTS_PER_DAY-(attemptsToday+1);
-      setToast({msg:rem>0?`${normName} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${window.SESSION_HOURS}h`:`${normName} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
-    } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
-    setSaving(false);
+    setErrors({});
+
+    // Multiple registered usernames share this first name — ask which one
+    // before saving anything.
+    if(isAmbiguous){ setPendingChoice({matches:candidateMatches,pts:p}); return; }
+    doSubmit(resolvedName,p);
   }
 
   async function deleteEntry(entry){
@@ -358,6 +426,11 @@ function EnterScores({allEntries,setAllEntries,setToast}){
               onFocus={e=>e.target.style.borderColor="#00cfff"}
               onBlur={e=>e.target.style.borderColor=errors.name?"#ff2d78":"rgba(255,255,255,0.15)"}/>
             {errors.name&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.name}</p>}
+            {!errors.name&&typedTrim&&(isAmbiguous?(
+              <p style={{color:"#ffd700",fontSize:10,marginTop:5,fontFamily:"'Fira Code',monospace"}}>⚠️ {candidateMatches.length} ninjas share this name — you'll pick the right one on submit</p>
+            ):(exactUsernameMatch||candidateMatches.length===1)?(
+              <p style={{color:"#39ff14",fontSize:10,marginTop:5,fontFamily:"'Fira Code',monospace"}}>🔗 Linked to {resolvedName}</p>
+            ):null)}
           </div>
 
           {name.trim()&&(
@@ -446,6 +519,11 @@ function EnterScores({allEntries,setAllEntries,setToast}){
           )}
         </Glass>
       </div>
+      {pendingChoice&&(
+        <PersonPickerModal matches={pendingChoice.matches} busy={saving}
+          onSelect={u=>doSubmit(u,pendingChoice.pts)}
+          onCancel={()=>{if(!saving)setPendingChoice(null);}}/>
+      )}
     </div>
   );
 }
