@@ -169,7 +169,107 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
   );
 }
 
-function NITDTab({allEntries,usernames,breakStatuses,isAdmin,onRefresh,refreshing,onBreakChanged}){
+// Opens the standalone Kiosk display in its own popup window — meant to be
+// dragged onto a second HDMI monitor and left open. It reads goals/breaks
+// live from Firebase, so nothing further is needed from this tab to keep it
+// in sync.
+function openKioskDisplay(){
+  const w = 1280, h = 800;
+  window.open("kiosk.html","cnKioskDisplay",
+    `width=${w},height=${h},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes`);
+}
+
+// Inline per-ninja goal assignment: a section dropdown + short goal text,
+// saved straight to Firebase. Every open Kiosk window (and every other
+// Sensei's "In The Dojo" tab) picks the change up immediately via
+// window.fbGoals.listen — no refresh needed anywhere.
+function GoalEditor({account,current}){
+  const [editing,setEditing]=useState(false);
+  const [section,setSection]=useState((current&&current.section)||window.CN_SECTIONS[0]);
+  const [goal,setGoal]=useState((current&&current.goal)||"");
+  const [saving,setSaving]=useState(false);
+
+  useEffect(()=>{
+    if(!editing){
+      setSection((current&&current.section)||window.CN_SECTIONS[0]);
+      setGoal((current&&current.goal)||"");
+    }
+  },[current,editing]);
+
+  async function save(){
+    if(!account||saving) return;
+    setSaving(true);
+    try{
+      await window.fbGoals.setGoal(window.cnKeySafe(account), account, section, goal.trim());
+      setEditing(false);
+    }catch(e){ console.warn(e); alert("Couldn't save the goal. Please try again."); }
+    setSaving(false);
+  }
+  async function clear(){
+    if(!account||saving) return;
+    setSaving(true);
+    try{ await window.fbGoals.clearGoal(window.cnKeySafe(account)); setEditing(false); }
+    catch(e){ console.warn(e); }
+    setSaving(false);
+  }
+
+  if(!editing){
+    return(
+      <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
+          <div style={{overflow:"hidden"}}>
+            {current&&current.goal?(
+              <>
+                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#00cfff",letterSpacing:.5}}>{current.section||"—"}</div>
+                <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:11.5,color:"rgba(255,255,255,0.8)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  🎯 {current.goal}
+                </div>
+              </>
+            ):(
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)"}}>No goal set yet</div>
+            )}
+          </div>
+          {account&&(
+            <button onClick={()=>setEditing(true)} style={{flexShrink:0,background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",
+              borderRadius:7,color:"rgba(255,255,255,0.7)",padding:"5px 9px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:9}}>
+              ✏ {current&&current.goal?"Edit":"Assign"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <div style={{marginTop:8,padding:"10px",borderRadius:8,background:"rgba(0,207,255,0.06)",border:"1px solid #00cfff33"}}>
+      <select value={section} onChange={e=>setSection(e.target.value)} style={{width:"100%",marginBottom:6,padding:"6px 8px",borderRadius:6,
+        background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:10}}>
+        {window.CN_SECTIONS.map(s=><option key={s} value={s}>{s}</option>)}
+      </select>
+      <input value={goal} onChange={e=>setGoal(e.target.value)} placeholder="Project goal (e.g. Finish the maze level)"
+        style={{width:"100%",marginBottom:8,padding:"6px 8px",borderRadius:6,background:"rgba(0,0,0,0.4)",
+          border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:11}}/>
+      <div style={{display:"flex",gap:6}}>
+        <button onClick={save} disabled={saving} style={{flex:1,padding:"7px",borderRadius:7,border:"none",cursor:saving?"not-allowed":"pointer",
+          background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:9,letterSpacing:.5}}>
+          {saving?"...":"💾 Save"}
+        </button>
+        {current&&current.goal&&(
+          <button onClick={clear} disabled={saving} style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,45,120,0.4)",
+            cursor:saving?"not-allowed":"pointer",background:"rgba(255,45,120,0.1)",color:"#ff2d78",fontFamily:"'Fira Code',monospace",fontSize:9}}>
+            Clear
+          </button>
+        )}
+        <button onClick={()=>setEditing(false)} disabled={saving} style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",
+          cursor:saving?"not-allowed":"pointer",background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",fontFamily:"'Fira Code',monospace",fontSize:9}}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,refreshing,onBreakChanged}){
   const today = window.todayStr();
   const todayEntries = allEntries.filter(e=>e.date===today);
   const [togglingAccount,setTogglingAccount]=useState(null);
@@ -346,6 +446,7 @@ function NITDApp(){
   const [allEntries,setAllEntries]=useState([]);
   const [usernames,setUsernames]=useState([]);
   const [breakStatuses,setBreakStatuses]=useState({});
+  const [goals,setGoals]=useState({});
   const [loading,setLoading]=useState(true);
   const [refreshing,setRefreshing]=useState(false);
   const isMobile=useIsMobile();
@@ -380,6 +481,14 @@ function NITDApp(){
     return ()=>clearInterval(iv);
   },[auth]);
 
+  // Goals are kept live (not polled) so an edit made here shows up on the
+  // Kiosk popup — and on any other open Sensei tab — right away.
+  useEffect(()=>{
+    if(!auth) return;
+    const unsub = window.fbGoals.listen(setGoals);
+    return unsub;
+  },[auth]);
+
   if(!auth||loading) return <LoadingScreen status="Checking the dojo..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
 
@@ -393,7 +502,7 @@ function NITDApp(){
           :<Sidebar active="nitd" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
         }
         <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
-          <NITDTab allEntries={allEntries} usernames={usernames} breakStatuses={breakStatuses}
+          <NITDTab allEntries={allEntries} usernames={usernames} breakStatuses={breakStatuses} goals={goals}
             isAdmin={isAdmin} onRefresh={()=>load(true)} refreshing={refreshing} onBreakChanged={reloadBreakStatuses}/>
         </div>
       </div>
