@@ -344,8 +344,16 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
           <span style={{width:7,height:7,borderRadius:"50%",background:"#39ff14",animation:"pulseDot 1.6s ease-in-out infinite"}}/>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14"}}>LIVE</span>
         </div>
+        {isAdmin&&(
+          <button onClick={openKioskDisplay}
+            style={{marginLeft:"auto",background:"rgba(57,255,20,0.1)",border:"1px solid #39ff1444",
+              borderRadius:8,color:"#39ff14",padding:"6px 14px",cursor:"pointer",
+              fontFamily:"'Fira Code',monospace",fontSize:11}}>
+            🖥️ Open Kiosk Display
+          </button>
+        )}
         <button onClick={onRefresh} disabled={refreshing}
-          style={{marginLeft:"auto",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",
+          style={{marginLeft:isAdmin?0:"auto",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",
             borderRadius:8,color:"rgba(255,255,255,0.6)",padding:"6px 14px",cursor:refreshing?"not-allowed":"pointer",
             fontFamily:"'Fira Code',monospace",fontSize:11}}>
           {refreshing?"↻ Refreshing...":"↻ Refresh"}
@@ -406,9 +414,20 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
                   <span style={{color:"rgba(255,255,255,0.35)"}}>{p.attempts} attempt{p.attempts!==1?"s":""} today</span>
                   <span style={{color:"#39ff14",fontWeight:700}}>{p.points.toLocaleString()} pts</span>
                 </div>
-                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:accessRemainingMin<=15?"#ff2d78":"rgba(255,255,255,0.3)",marginBottom:isAdmin?12:0}}>
+                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:accessRemainingMin<=15?"#ff2d78":"rgba(255,255,255,0.3)"}}>
                   🔑 login access: {accessRemainingMin}m left
                 </div>
+                {isAdmin?(
+                  <GoalEditor account={account} current={account?goals[window.cnKeySafe(account)]:null}/>
+                ):(account && goals[window.cnKeySafe(account)] && goals[window.cnKeySafe(account)].goal)?(
+                  <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)"}}>
+                    <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#00cfff",letterSpacing:.5}}>{goals[window.cnKeySafe(account)].section||"—"}</div>
+                    <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:11.5,color:"rgba(255,255,255,0.8)"}}>
+                      🎯 {goals[window.cnKeySafe(account)].goal}
+                    </div>
+                  </div>
+                ):null}
+                <div style={{marginTop:isAdmin?8:0}}/>
                 {isAdmin&&(
                   <>
                     <button onClick={()=>handleBreakToggle(account,onBreak)}
