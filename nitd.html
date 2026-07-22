@@ -287,6 +287,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
   // always reflects who can currently sign in.
   const map = {};
   todayEntries.forEach(e=>{
+    if(!e||!e.name) return; // skip malformed entries instead of crashing
     const key = e.name.trim().toLowerCase();
     if(!map[key]) map[key]={name:e.name.trim(),points:0,attempts:0,lastSeen:0};
     map[key].name = e.name.trim(); // keep most-recent casing for display
