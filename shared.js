@@ -82,6 +82,13 @@
     },
     async deleteEntry(week,entryId){
       await db.ref(`leaderboards/week_${week}/entries/${entryId}`).remove();
+    },
+    // Realtime listener — fires immediately whenever any entry changes.
+    listen(callback){
+      const ref = db.ref("leaderboards");
+      const handler = () => { window.fbLeaderboard.getAll().then(callback).catch(()=>{}); };
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
     }
   };
 
@@ -97,6 +104,13 @@
         else if(typeof key === "string" && key.includes(".")) list.push(key);
       }
       return [...new Set(list)];
+    },
+    // Realtime listener — fires immediately whenever the username list changes.
+    listen(callback){
+      const ref = db.ref("usernames");
+      const handler = () => { window.fbUsernames.getAll().then(callback).catch(()=>{}); };
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
     }
   };
 
@@ -167,6 +181,44 @@
     async setBreak(usernameKey, on){
       if(on){ await db.ref(`games/onBreak/${usernameKey}`).set({startedAt: Date.now()}); }
       else{ await db.ref(`games/onBreak/${usernameKey}`).remove(); }
+    },
+    // Realtime listener — fires immediately whenever ANY window changes break
+    // status (used by the Kiosk display so it updates without a refresh).
+    // Returns an unsubscribe function.
+    listen(callback){
+      const ref = db.ref("games/onBreak");
+      const handler = snap => callback(snap.val() || {});
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Project Goals — per-ninja goal + curriculum section, set by Senseis from
+  // "In The Dojo" and mirrored live onto the Kiosk display for a second
+  // monitor. Keyed by the same cnKeySafe account key used everywhere else
+  // (breaks, sessions) so it always lines up with a linked account.
+  // -------------------------------------------------------------------------
+  window.CN_SECTIONS = ["Impact","JR","Robotics","Unity"];
+  window.fbGoals = {
+    async getAll(){
+      const snap = await db.ref("goals").once("value");
+      return snap.val() || {};
+    },
+    async setGoal(accountKey, name, section, goal){
+      await db.ref(`goals/${accountKey}`).set({
+        name: name || "", section: section || "", goal: goal || "", updatedAt: Date.now()
+      });
+    },
+    async clearGoal(accountKey){
+      await db.ref(`goals/${accountKey}`).remove();
+    },
+    // Realtime listener — fires immediately on any change, from any window.
+    listen(callback){
+      const ref = db.ref("goals");
+      const handler = snap => callback(snap.val() || {});
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
     }
   };
 
