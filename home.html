@@ -39,6 +39,7 @@ const TourOverlay = window.CnTourOverlay;
 function groupEntries(entries){
   const map = {};
   for(const e of entries){
+    if(!e || !e.name) continue; // skip malformed entries instead of crashing
     const key = `${e.week}|${e.name}|${e.date}`;
     if(!map[key]) map[key]={week:e.week,name:e.name,date:e.date,points:0,ids:[],attempts:0};
     map[key].points += e.points;
@@ -50,6 +51,7 @@ function groupEntries(entries){
 function calcNinjaSummary(groupedForWeek){
   const map = {};
   for(const e of groupedForWeek){
+    if(!e || !e.name) continue;
     if(!map[e.name]) map[e.name]={name:e.name,total:0,days:[]};
     map[e.name].total += e.points;
     map[e.name].days.push({date:e.date,points:e.points,attempts:e.attempts,ids:e.ids});
@@ -57,7 +59,7 @@ function calcNinjaSummary(groupedForWeek){
   return Object.values(map).sort((a,b)=>b.total-a.total);
 }
 function countUniqueNinjas(allEntries){
-  const names = new Set(allEntries.map(e=>e.name.trim().toLowerCase()));
+  const names = new Set(allEntries.filter(e=>e&&e.name).map(e=>e.name.trim().toLowerCase()));
   return names.size;
 }
 
