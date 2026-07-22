@@ -343,15 +343,22 @@
     async findActivePointsEntry(loginName){
       const trimmed = String(loginName || "").trim();
       if(!trimmed) return {ok:false, reason:"empty"};
-      // Points entries are saved under first name only (e.g. "Nathan"),
-      // but students log in with their full username (e.g. "nathan.blah").
-      // Match on the first-name portion of whatever was typed at login.
+      // Points entries are usually saved under first name only (e.g. "Nathan"),
+      // but when two ninjas share a first name, entrygames.html disambiguates
+      // by saving the full registered username instead (e.g. "Nathan.blah").
+      // Students always log in with their full username, so accept a match
+      // against either stored form.
+      const fullTyped = trimmed.toLowerCase();
       const firstName = trimmed.split(".")[0].trim().toLowerCase();
       const today = window.todayStr();
       let all = [];
       try{ all = await window.fbLeaderboard.getAll(); }
       catch(e){ return {ok:false, reason:"error"}; }
-      const matches = all.filter(e => e.date === today && e.name && e.name.trim().toLowerCase() === firstName);
+      const matches = all.filter(e => {
+        if(e.date !== today || !e.name) return false;
+        const stored = e.name.trim().toLowerCase();
+        return stored === firstName || stored === fullTyped;
+      });
       if(matches.length === 0) return {ok:false, reason:"not_entered"};
       const mostRecent = matches.reduce((m,e)=>Math.max(m, e.createdAt || 0), 0);
       if(!mostRecent) return {ok:false, reason:"not_entered"};
