@@ -14,14 +14,14 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{height:100%;background:#060609;color:#fff;overflow:hidden;}
+html,body{height:100%;background:#f4f6f9;color:#14161a;overflow:hidden;}
 #root{min-height:100vh;}
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-track{background:transparent;}
-::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+::-webkit-scrollbar-thumb{background:rgba(26,140,26,0.35);border-radius:99px;}
 @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.3}}
-@keyframes pulseBorder{0%,100%{box-shadow:0 0 0 rgba(255,140,0,0)}50%{box-shadow:0 0 14px rgba(255,140,0,0.55)}}
+@keyframes pulseBorder{0%,100%{box-shadow:0 0 0 rgba(204,109,0,0)}50%{box-shadow:0 0 12px rgba(204,109,0,0.35)}}
 .kiosk-grid{grid-template-columns:repeat(4,minmax(0,1fr));}
 @media(max-width:1100px){.kiosk-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:560px){.kiosk-grid{grid-template-columns:1fr;}}
@@ -33,25 +33,26 @@ html,body{height:100%;background:#060609;color:#fff;overflow:hidden;}
 <script type="text/babel">
 const {useState,useEffect,useMemo} = React;
 
-// Visual identity per section — keeps each column instantly distinguishable
-// from across a room.
+// Visual identity per section — darker, more saturated tones than a dark-mode
+// UI would use, so each column stays legible against a bright projected white
+// background. Keeps each column instantly distinguishable from across a room.
 const SECTION_STYLE = {
-  Impact:  {color:"#ff2d78", icon:"💥"},
-  JR:      {color:"#00cfff", icon:"🧒"},
-  Robotics:{color:"#ff8c00", icon:"🤖"},
-  Unity:   {color:"#39ff14", icon:"🎮"},
+  Impact:  {color:"#c2005f", icon:"💥"},
+  JR:      {color:"#0077b6", icon:"🧒"},
+  Robotics:{color:"#c96a00", icon:"🤖"},
+  Unity:   {color:"#1a8c1a", icon:"🎮"},
 };
-function styleFor(section){ return SECTION_STYLE[section] || {color:"#fff", icon:"🥷"}; }
+function styleFor(section){ return SECTION_STYLE[section] || {color:"#14161a", icon:"🥷"}; }
 
 function Clock(){
   const [now,setNow]=useState(new Date());
   useEffect(()=>{ const iv=setInterval(()=>setNow(new Date()),1000); return ()=>clearInterval(iv); },[]);
   return(
     <div style={{textAlign:"right"}}>
-      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:"clamp(16px,1.6vw,22px)",color:"#fff"}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:"clamp(16px,1.6vw,22px)",color:"#14161a"}}>
         {now.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit",second:"2-digit"})}
       </div>
-      <div style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,0.9vw,12px)",color:"rgba(255,255,255,0.4)"}}>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,0.9vw,12px)",color:"rgba(0,0,0,0.45)"}}>
         {now.toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"})}
       </div>
     </div>
@@ -67,14 +68,15 @@ function NinjaCard({name,goal,onBreak,remainingMin,accent}){
       position:"relative",
       padding:"calc(var(--card-pad,14px))",
       borderRadius:"calc(var(--card-radius,14px))",
-      background: onBreak ? "rgba(255,140,0,0.08)" : "rgba(255,255,255,0.05)",
-      border: onBreak ? "1px solid rgba(255,140,0,0.5)" : `1px solid ${accent}33`,
+      background: onBreak ? "rgba(204,109,0,0.07)" : "#ffffff",
+      border: onBreak ? "1px solid rgba(204,109,0,0.45)" : `1px solid ${accent}33`,
+      boxShadow: onBreak ? "none" : "0 1px 3px rgba(20,22,26,0.06)",
       animation: onBreak ? "fadeUp .35s ease both, pulseBorder 2.2s ease-in-out infinite" : "fadeUp .35s ease both",
       minWidth:0,
     }}>
       <div style={{
         fontFamily:"'Exo 2',sans-serif",fontWeight:700,
-        fontSize:"var(--name-size,15px)",color:"#fff",
+        fontSize:"var(--name-size,15px)",color:"#14161a",
         overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:4,
       }} title={name}>
         🥷 {name}
@@ -82,23 +84,23 @@ function NinjaCard({name,goal,onBreak,remainingMin,accent}){
       {goal ? (
         <div style={{
           fontFamily:"'Fira Code',monospace",fontSize:"var(--goal-size,11px)",
-          color:"rgba(255,255,255,0.65)",lineHeight:1.35,
+          color:"rgba(20,22,26,0.7)",lineHeight:1.35,
           display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden",
         }} title={goal}>
           🎯 {goal}
         </div>
       ) : (
-        <div style={{fontFamily:"'Fira Code',monospace",fontSize:"var(--goal-size,11px)",color:"rgba(255,255,255,0.25)"}}>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:"var(--goal-size,11px)",color:"rgba(20,22,26,0.35)"}}>
           No goal set yet
         </div>
       )}
       {onBreak && (
         <div style={{
           marginTop:6,display:"inline-flex",alignItems:"center",gap:5,
-          padding:"3px 8px",borderRadius:99,background:"rgba(255,140,0,0.18)",border:"1px solid #ff8c0055",
+          padding:"3px 8px",borderRadius:99,background:"rgba(204,109,0,0.14)",border:"1px solid rgba(204,109,0,0.4)",
         }}>
-          <span style={{width:6,height:6,borderRadius:"50%",background:"#ff8c00",animation:"pulseDot 1.4s ease-in-out infinite"}}/>
-          <span style={{fontFamily:"'Fira Code',monospace",fontSize:"var(--badge-size,9px)",color:"#ff8c00"}}>
+          <span style={{width:6,height:6,borderRadius:"50%",background:"#c96a00",animation:"pulseDot 1.4s ease-in-out infinite"}}/>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:"var(--badge-size,9px)",color:"#c96a00"}}>
             ON BREAK · {remainingMin}m left
           </span>
         </div>
@@ -127,7 +129,8 @@ function SectionColumn({section,ninjas}){
   return(
     <div style={{
       display:"flex",flexDirection:"column",minHeight:0,height:"100%",
-      background:"rgba(255,255,255,0.03)",border:`1px solid ${color}2e`,borderRadius:16,overflow:"hidden",
+      background:"#ffffff",border:`1px solid ${color}2e`,borderRadius:16,overflow:"hidden",
+      boxShadow:"0 1px 4px rgba(20,22,26,0.05)",
     }}>
       <div style={{
         display:"flex",alignItems:"center",gap:8,padding:"10px 14px",flexShrink:0,
@@ -139,7 +142,7 @@ function SectionColumn({section,ninjas}){
         </span>
         <span style={{
           marginLeft:"auto",fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,1vw,11px)",
-          color:"rgba(255,255,255,0.4)",background:"rgba(0,0,0,0.3)",padding:"2px 8px",borderRadius:99,
+          color:"rgba(20,22,26,0.55)",background:"rgba(20,22,26,0.06)",padding:"2px 8px",borderRadius:99,
         }}>
           {ninjas.length}
         </span>
@@ -149,7 +152,7 @@ function SectionColumn({section,ninjas}){
           <div style={{
             height:"100%",display:"flex",alignItems:"center",justifyContent:"center",textAlign:"center",padding:12,
           }}>
-            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.25)"}}>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(20,22,26,0.3)"}}>
               No ninjas assigned yet
             </span>
           </div>
@@ -238,31 +241,31 @@ function KioskApp(){
   return(
     <div style={{
       position:"fixed",inset:0,display:"flex",flexDirection:"column",padding:"16px 20px",
-      background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609",
+      background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(26,140,26,0.05) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,119,182,0.05) 0%,transparent 70%),#f4f6f9",
     }}>
       <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14,flexShrink:0}}>
         <div>
           <div style={{
             fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:"clamp(16px,1.8vw,24px)",letterSpacing:1,
-            background:"linear-gradient(135deg,#39ff14,#00cfff)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",
+            background:"linear-gradient(135deg,#1a8c1a,#0077b6)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",
           }}>
-            CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,1vw,12px)",color:"rgba(255,255,255,0.35)",letterSpacing:2}}>ROBBINSVILLE</span>
+            CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,1vw,12px)",color:"rgba(20,22,26,0.45)",letterSpacing:2}}>ROBBINSVILLE</span>
           </div>
-          <div style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,1vw,11px)",color:"rgba(255,255,255,0.35)"}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,1vw,11px)",color:"rgba(20,22,26,0.45)"}}>
             Project Goals · {totalCount} ninja{totalCount!==1?"s":""} present now
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:99,
-          background:"rgba(57,255,20,0.1)",border:"1px solid #39ff1444"}}>
-          <span style={{width:7,height:7,borderRadius:"50%",background:"#39ff14",animation:"pulseDot 1.6s ease-in-out infinite"}}/>
-          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14"}}>LIVE</span>
+          background:"rgba(26,140,26,0.1)",border:"1px solid rgba(26,140,26,0.35)"}}>
+          <span style={{width:7,height:7,borderRadius:"50%",background:"#1a8c1a",animation:"pulseDot 1.6s ease-in-out infinite"}}/>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#1a8c1a"}}>LIVE</span>
         </div>
         <div style={{marginLeft:"auto"}}><Clock/></div>
       </div>
 
       {loading ? (
         <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(255,255,255,0.3)"}}>Loading goals...</div>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:12,color:"rgba(20,22,26,0.35)"}}>Loading goals...</div>
         </div>
       ) : (
         <div className="kiosk-grid" style={{flex:1,minHeight:0,display:"grid",gap:12}}>
