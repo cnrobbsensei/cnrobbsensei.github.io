@@ -177,12 +177,16 @@ function SectionColumn({section,ninjas}){
 function KioskApp(){
   const [goals,setGoals]=useState(null);
   const [breaks,setBreaks]=useState({});
+  const [allEntries,setAllEntries]=useState([]);
+  const [usernames,setUsernames]=useState([]);
   const [nowTick,setNowTick]=useState(Date.now());
 
   useEffect(()=>{
     const unsubGoals = window.fbGoals.listen(setGoals);
     const unsubBreaks = window.fbBreak.listen(setBreaks);
-    return ()=>{ unsubGoals&&unsubGoals(); unsubBreaks&&unsubBreaks(); };
+    const unsubEntries = window.fbLeaderboard.listen(setAllEntries);
+    const unsubUsernames = window.fbUsernames.listen(setUsernames);
+    return ()=>{ unsubGoals&&unsubGoals(); unsubBreaks&&unsubBreaks(); unsubEntries&&unsubEntries(); unsubUsernames&&unsubUsernames(); };
   },[]);
 
   useEffect(()=>{
@@ -190,10 +194,34 @@ function KioskApp(){
     return ()=>clearInterval(iv);
   },[]);
 
+  // Which accounts are currently within their 2-hour Points access window —
+  // the exact same rule that drives "In The Dojo" and student login, so a
+  // ninja whose access has expired disappears from the kiosk automatically.
+  const presentAccountKeys = useMemo(()=>{
+    const today = window.todayStr();
+    const map = {};
+    (allEntries||[]).filter(e=>e && e.date===today).forEach(e=>{
+      if(!e.name) return;
+      const key = e.name.trim().toLowerCase();
+      if(!map[key]) map[key]={name:e.name.trim(),lastSeen:0};
+      map[key].name = e.name.trim();
+      map[key].lastSeen = Math.max(map[key].lastSeen, e.createdAt||0);
+    });
+    const keys = new Set();
+    Object.values(map)
+      .filter(p=>p.lastSeen && (nowTick-p.lastSeen<=window.SESSION_MS))
+      .forEach(p=>{
+        const account = window.findLinkedAccount(p.name, usernames);
+        if(account) keys.add(window.cnKeySafe(account));
+      });
+    return keys;
+  },[allEntries,usernames,nowTick]);
+
   const bySection = useMemo(()=>{
     const map = {}; window.CN_SECTIONS.forEach(s=>map[s]=[]);
     Object.entries(goals||{}).forEach(([key,g])=>{
       if(!g || !g.name) return;
+      if(!presentAccountKeys.has(key)) return; // hide ninjas past their 2-hour window
       const section = window.CN_SECTIONS.includes(g.section) ? g.section : window.CN_SECTIONS[0];
       const breakEntry = breaks[key];
       const onBreak = window.cnIsBreakActive(breakEntry);
@@ -202,7 +230,7 @@ function KioskApp(){
     });
     Object.values(map).forEach(list=>list.sort((a,b)=>a.name.localeCompare(b.name)));
     return map;
-  },[goals,breaks,nowTick]);
+  },[goals,breaks,presentAccountKeys,nowTick]);
 
   const loading = goals===null;
   const totalCount = Object.values(bySection).reduce((n,l)=>n+l.length,0);
@@ -221,7 +249,7 @@ function KioskApp(){
             CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,1vw,12px)",color:"rgba(255,255,255,0.35)",letterSpacing:2}}>ROBBINSVILLE</span>
           </div>
           <div style={{fontFamily:"'Fira Code',monospace",fontSize:"clamp(9px,1vw,11px)",color:"rgba(255,255,255,0.35)"}}>
-            Project Goals · {totalCount} ninja{totalCount!==1?"s":""} assigned
+            Project Goals · {totalCount} ninja{totalCount!==1?"s":""} present now
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:99,
