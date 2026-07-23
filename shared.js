@@ -301,6 +301,23 @@
     {id:"tutorial",icon:"📘",label:"Tutorial",href:"tutorial.html"},
   ];
 
+  // Given the first-name recorded on a Points entry, finds the matching full
+  // registered username (e.g. "adam" -> "adam.dodo") if one exists. Shared by
+  // "In The Dojo" and the Kiosk display so both agree on which ninjas are
+  // actually linked to an account (and therefore can have goals/breaks set).
+  window.findLinkedAccount = function(firstName, usernames){
+    const target = String(firstName).trim().toLowerCase();
+    if(!target) return null;
+    usernames = usernames || [];
+    let match = usernames.find(u=>{
+      const seg = u.split(".")[0];
+      return seg && seg.toLowerCase()===target;
+    });
+    if(match) return match;
+    match = usernames.find(u=>u.toLowerCase()===target);
+    return match || null;
+  };
+
   // -------------------------------------------------------------------------
   // Session handling
   //  - sessionStorage (not localStorage) means closing the tab signs you out.
