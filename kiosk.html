@@ -181,7 +181,15 @@ function SectionColumn({section,ninjas}){
 // NOTE: this API key is embedded in client-side code and is visible to
 // anyone viewing page source on the kiosk. Consider proxying this call
 // through a small backend if that's a concern for your setup.
-async function speak(text){
+//
+// `audioEl` is a single, reused <audio> element that was already played
+// once from a real user click (see the "enable announcements" button).
+// Browsers only allow audio to autoplay after a user gesture has
+// unlocked it — reusing that same already-unlocked element for every
+// later, gesture-less announcement is what keeps those from being
+// silently blocked. onError lets the UI show a visible message, since
+// a kiosk display has no console anyone will ever look at.
+async function speak(text, audioEl, onError){
 
   try{
 
@@ -211,10 +219,9 @@ async function speak(text){
 
 
     if(!response.ok){
-      console.error(
-        "ElevenLabs Error:",
-        await response.text()
-      );
+      const detail = await response.text();
+      console.error("ElevenLabs Error:", detail);
+      onError && onError(`ElevenLabs API error (${response.status}): ${detail.slice(0,200)}`);
       return;
     }
 
@@ -223,11 +230,16 @@ async function speak(text){
 
     const url = URL.createObjectURL(blob);
 
-    const audio = new Audio(url);
+    const el = audioEl || new Audio();
+    el.src = url;
+    el.volume = 1;
 
-    audio.volume = 1;
-
-    await audio.play();
+    try{
+      await el.play();
+    }catch(playErr){
+      console.error("Audio playback blocked:", playErr);
+      onError && onError(`Playback blocked by browser: ${playErr.message}. Tap "enable announcements" again.`);
+    }
 
 
   }catch(err){
@@ -236,6 +248,7 @@ async function speak(text){
       "ElevenLabs TTS failed:",
       err
     );
+    onError && onError(`TTS request failed: ${err.message}`);
 
   }
 
@@ -250,7 +263,16 @@ function KioskApp(){
   const [soundEnabled,setSoundEnabled]=useState(
   localStorage.getItem("kioskSound") === "true"
   );
+  const [ttsError,setTtsError]=useState(null);
   const prevBreakRef = React.useRef({});
+  // Single <audio> element, unlocked by the real click on the "enable
+  // announcements" button below. Every later announcement reuses it
+  // instead of creating a fresh Audio() from inside a non-click
+  // useEffect, which browsers are liable to block silently.
+  const audioElRef = React.useRef(null);
+  if(!audioElRef.current && typeof Audio !== "undefined"){
+    audioElRef.current = new Audio();
+  }
 
   useEffect(()=>{
     const unsubGoals = window.fbGoals.listen(setGoals);
@@ -315,7 +337,7 @@ function KioskApp(){
     allNinjas.forEach(nj=>{
       const was = prevBreakRef.current[nj.key];
       if(was===true && nj.onBreak===false && soundEnabled){
-        speak(`${nj.name}'s break has finished.`);
+        speak(`${nj.name}'s break has finished.`, audioElRef.current, setTtsError);
       }
       prevBreakRef.current[nj.key] = nj.onBreak;
     });
@@ -348,7 +370,8 @@ function KioskApp(){
             const next = !soundEnabled;
             setSoundEnabled(next);
             localStorage.setItem("kioskSound", next ? "true" : "false");
-            if(next) speak("Announcements enabled.");
+            setTtsError(null);
+            if(next) speak("Announcements enabled.", audioElRef.current, setTtsError);
           }}
           style={{
             display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:99,cursor:"pointer",
@@ -359,8 +382,32 @@ function KioskApp(){
           }}>
           {soundEnabled ? "🔊 Announcements on" : "🔇 Tap to enable announcements"}
         </button>
+        {soundEnabled && (
+          <button
+            onClick={()=>{
+              setTtsError(null);
+              speak("Test ninja's break has finished.", audioElRef.current, setTtsError);
+            }}
+            style={{
+              padding:"4px 12px",borderRadius:99,cursor:"pointer",
+              background:"rgba(20,22,26,0.05)",border:"1px solid rgba(20,22,26,0.12)",
+              fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(20,22,26,0.45)",
+            }}>
+            ▶ Test sound
+          </button>
+        )}
         <div style={{marginLeft:"auto"}}><Clock/></div>
       </div>
+
+      {ttsError && (
+        <div style={{
+          marginBottom:10,padding:"6px 12px",borderRadius:8,flexShrink:0,
+          background:"rgba(194,0,0,0.08)",border:"1px solid rgba(194,0,0,0.3)",
+          fontFamily:"'Fira Code',monospace",fontSize:10,color:"#c20000",
+        }}>
+          ⚠ {ttsError}
+        </div>
+      )}
 
       {loading ? (
         <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
