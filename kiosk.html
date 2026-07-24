@@ -177,9 +177,10 @@ function SectionColumn({section,ninjas}){
   );
 }
 
-// Uses the browser's built-in text-to-speech (Web Speech API) — free, no API
-// key, works offline. Prefers a higher-quality "Google" English voice when
-// the browser offers one, falling back to whatever default voice exists.
+// Uses ElevenLabs text-to-speech for announcements.
+// NOTE: this API key is embedded in client-side code and is visible to
+// anyone viewing page source on the kiosk. Consider proxying this call
+// through a small backend if that's a concern for your setup.
 async function speak(text){
 
   try{
@@ -342,11 +343,13 @@ function KioskApp(){
           <span style={{width:7,height:7,borderRadius:"50%",background:"#1a8c1a",animation:"pulseDot 1.6s ease-in-out infinite"}}/>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#1a8c1a"}}>LIVE</span>
         </div>
-        <button onClick={()=>{
-        setSoundEnabled(true);
-        localStorage.setItem("kioskSound","true");
-        speak("Announcements enabled.");
-        }}>
+        <button
+          onClick={()=>{
+            const next = !soundEnabled;
+            setSoundEnabled(next);
+            localStorage.setItem("kioskSound", next ? "true" : "false");
+            if(next) speak("Announcements enabled.");
+          }}
           style={{
             display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:99,cursor:"pointer",
             background: soundEnabled ? "rgba(20,22,26,0.05)" : "rgba(201,106,0,0.12)",
