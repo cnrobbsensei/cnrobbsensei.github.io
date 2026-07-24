@@ -246,7 +246,9 @@ function KioskApp(){
   const [allEntries,setAllEntries]=useState([]);
   const [usernames,setUsernames]=useState([]);
   const [nowTick,setNowTick]=useState(Date.now());
-  const [soundEnabled,setSoundEnabled]=useState(false);
+  const [soundEnabled,setSoundEnabled]=useState(
+  localStorage.getItem("kioskSound") === "true"
+  );
   const prevBreakRef = React.useRef({});
 
   useEffect(()=>{
@@ -340,7 +342,11 @@ function KioskApp(){
           <span style={{width:7,height:7,borderRadius:"50%",background:"#1a8c1a",animation:"pulseDot 1.6s ease-in-out infinite"}}/>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#1a8c1a"}}>LIVE</span>
         </div>
-        <button onClick={()=>{ setSoundEnabled(true); speak("Announcements enabled."); }}
+        <button onClick={()=>{
+        setSoundEnabled(true);
+        localStorage.setItem("kioskSound","true");
+        speak("Announcements enabled.");
+        }}>
           style={{
             display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:99,cursor:"pointer",
             background: soundEnabled ? "rgba(20,22,26,0.05)" : "rgba(201,106,0,0.12)",
