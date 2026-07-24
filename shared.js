@@ -169,7 +169,8 @@
   // -------------------------------------------------------------------------
   // Per-student break flags (set from "In The Dojo", used by Games)
   // -------------------------------------------------------------------------
-  window.BREAK_DURATION_MS = 10*60*1000; // 10 minutes
+  // window.BREAK_DURATION_MS = 10*60*1000; // 10 minutes
+   window.BREAK_DURATION_MS = 10000; // 10 seconds
   window.cnIsBreakActive = function(entry){
     return !!(entry && entry.startedAt && (Date.now()-entry.startedAt < window.BREAK_DURATION_MS));
   };
