@@ -177,12 +177,29 @@ function SectionColumn({section,ninjas}){
   );
 }
 
+// Uses the browser's built-in text-to-speech (Web Speech API) — free, no API
+// key, works offline. Prefers a higher-quality "Google" English voice when
+// the browser offers one, falling back to whatever default voice exists.
+function speak(text){
+  try{
+    if(!window.speechSynthesis) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1; u.pitch = 1; u.volume = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v=>/en/i.test(v.lang) && /Google/i.test(v.name)) || voices.find(v=>/en/i.test(v.lang));
+    if(preferred) u.voice = preferred;
+    window.speechSynthesis.speak(u);
+  }catch(e){ /* speech not available, silently skip */ }
+}
+
 function KioskApp(){
   const [goals,setGoals]=useState(null);
   const [breaks,setBreaks]=useState({});
   const [allEntries,setAllEntries]=useState([]);
   const [usernames,setUsernames]=useState([]);
   const [nowTick,setNowTick]=useState(Date.now());
+  const [soundEnabled,setSoundEnabled]=useState(false);
+  const prevBreakRef = React.useRef({});
 
   useEffect(()=>{
     const unsubGoals = window.fbGoals.listen(setGoals);
@@ -235,8 +252,29 @@ function KioskApp(){
     return map;
   },[goals,breaks,presentAccountKeys,nowTick]);
 
+  useEffect(()=>{
+    if(!window.speechSynthesis) return;
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.onvoiceschanged = ()=>window.speechSynthesis.getVoices();
+  },[]);
+
   const loading = goals===null;
   const totalCount = Object.values(bySection).reduce((n,l)=>n+l.length,0);
+
+  // Watches every card currently on the kiosk for a break flipping from
+  // active -> inactive (either the Sensei ended it early, or the 10-minute
+  // timer ran out) and announces it out loud. Uses a ref (not state) to
+  // remember each ninja's last-seen status without triggering re-renders.
+  useEffect(()=>{
+    const allNinjas = Object.values(bySection).flat();
+    allNinjas.forEach(nj=>{
+      const was = prevBreakRef.current[nj.key];
+      if(was===true && nj.onBreak===false && soundEnabled){
+        speak(`${nj.name}'s break is over. Back to class!`);
+      }
+      prevBreakRef.current[nj.key] = nj.onBreak;
+    });
+  },[bySection,soundEnabled]);
 
   return(
     <div style={{
@@ -260,6 +298,16 @@ function KioskApp(){
           <span style={{width:7,height:7,borderRadius:"50%",background:"#1a8c1a",animation:"pulseDot 1.6s ease-in-out infinite"}}/>
           <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#1a8c1a"}}>LIVE</span>
         </div>
+        <button onClick={()=>{ setSoundEnabled(true); speak("Announcements enabled."); }}
+          style={{
+            display:"flex",alignItems:"center",gap:6,padding:"4px 12px",borderRadius:99,cursor:"pointer",
+            background: soundEnabled ? "rgba(20,22,26,0.05)" : "rgba(201,106,0,0.12)",
+            border: soundEnabled ? "1px solid rgba(20,22,26,0.12)" : "1px solid rgba(201,106,0,0.4)",
+            fontFamily:"'Fira Code',monospace",fontSize:10,
+            color: soundEnabled ? "rgba(20,22,26,0.45)" : "#c96a00",
+          }}>
+          {soundEnabled ? "🔊 Announcements on" : "🔇 Tap to enable announcements"}
+        </button>
         <div style={{marginLeft:"auto"}}><Clock/></div>
       </div>
 
