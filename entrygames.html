@@ -55,6 +55,19 @@ function groupEntries(entries){
   }
   return Object.values(map);
 }
+// Most recent createdAt across ALL of this ninja's entries (any day) — used
+// to enforce the 20-minute cooldown between entries for the same ninja.
+function getLastEntryTime(allEntries, name){
+  const target = String(name||"").trim().toLowerCase();
+  if(!target) return 0;
+  let latest = 0;
+  for(const e of allEntries){
+    if(e && e.name && e.name.trim().toLowerCase()===target){
+      latest = Math.max(latest, e.createdAt||0);
+    }
+  }
+  return latest;
+}
 function getAttemptsToday(allEntries, name, week, date){
   return allEntries.filter(e =>
     e && e.name &&
@@ -368,9 +381,27 @@ function EnterScores({allEntries,setAllEntries,setToast}){
   const maxedOut=attemptsToday>=MAX_ATTEMPTS_PER_DAY;
   const barColor=attemptsLeft===0?"#ff2d78":attemptsLeft===1?"#ffd700":"#39ff14";
 
+  // 20-minute cooldown: once a ninja gets an entry, no new entry for that same
+  // ninja is allowed until the cooldown passes — ticks every second so the
+  // countdown and the disabled state update live without needing a refresh.
+  const [nowTick,setNowTick]=useState(Date.now());
+  useEffect(()=>{ const iv=setInterval(()=>setNowTick(Date.now()),1000); return ()=>clearInterval(iv); },[]);
+  const lastEntryTime=previewName?getLastEntryTime(allEntries,previewName):0;
+  const cooldownRemainingMs=lastEntryTime?Math.max(0,(lastEntryTime+window.ENTRY_COOLDOWN_MS)-nowTick):0;
+  const onCooldown=cooldownRemainingMs>0;
+  const cooldownLabel=onCooldown?`${Math.floor(cooldownRemainingMs/60000)}:${String(Math.floor((cooldownRemainingMs%60000)/1000)).padStart(2,"0")}`:null;
+
   async function doSubmit(rawName,p){
-    setSaving(true);
     const normName = window.cnNormalizeName ? window.cnNormalizeName(rawName) : rawName.trim();
+    const lastTime = getLastEntryTime(allEntries,normName);
+    const remaining = lastTime ? Math.max(0,(lastTime+window.ENTRY_COOLDOWN_MS)-Date.now()) : 0;
+    if(remaining>0){
+      const mins = Math.ceil(remaining/60000);
+      setPendingChoice(null);
+      setToast({msg:`⏳ ${normName} was just entered — wait ${mins} more minute${mins!==1?"s":""} before entering again.`,color:"#ff2d78"});
+      return;
+    }
+    setSaving(true);
     const priorAttempts = getAttemptsToday(allEntries,normName,cw,today);
     try{
       const result=await window.fbLeaderboard.addEntry(cw,normName,p,today);
@@ -385,7 +416,7 @@ function EnterScores({allEntries,setAllEntries,setToast}){
   }
 
   async function submit(){
-    if(!inputOpen||maxedOut) return;
+    if(!inputOpen||maxedOut||onCooldown) return;
     const errs={};
     if(!name.trim()) errs.name="Name is required";
     const p=Number(pts);
@@ -454,14 +485,26 @@ function EnterScores({allEntries,setAllEntries,setToast}){
             </div>
           )}
 
+          {previewName&&onCooldown&&(
+            <div style={{marginBottom:16,borderRadius:10,padding:"11px 14px",background:"rgba(255,45,120,0.08)",border:"1px solid #ff2d7844"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#ff2d78",letterSpacing:1}}>⏳ COOLDOWN ACTIVE</span>
+                <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:700,color:"#ff2d78"}}>{cooldownLabel}</span>
+              </div>
+              <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.35)",margin:"6px 0 0",lineHeight:1.5}}>
+                {previewName} was just entered — a ninja must wait {window.ENTRY_COOLDOWN_MINUTES} minutes between entries.
+              </p>
+            </div>
+          )}
+
           <div style={{marginBottom:14}}>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>POINTS THIS ATTEMPT</label>
             <input value={pts} onChange={e=>setPts(e.target.value)} placeholder="e.g. 850" type="number" min="0"
-              disabled={maxedOut}
-              style={{...iStyle(errors.pts),fontFamily:"'Fira Code',monospace",fontSize:16,opacity:maxedOut?.4:1,cursor:maxedOut?"not-allowed":"text"}}
-              onFocus={e=>{if(!maxedOut)e.target.style.borderColor="#39ff14";}}
+              disabled={maxedOut||onCooldown}
+              style={{...iStyle(errors.pts),fontFamily:"'Fira Code',monospace",fontSize:16,opacity:(maxedOut||onCooldown)?.4:1,cursor:(maxedOut||onCooldown)?"not-allowed":"text"}}
+              onFocus={e=>{if(!maxedOut&&!onCooldown)e.target.style.borderColor="#39ff14";}}
               onBlur={e=>e.target.style.borderColor=errors.pts?"#ff2d78":"rgba(255,255,255,0.15)"}
-              onKeyDown={e=>e.key==="Enter"&&!saving&&!maxedOut&&submit()}/>
+              onKeyDown={e=>e.key==="Enter"&&!saving&&!maxedOut&&!onCooldown&&submit()}/>
             {errors.pts&&<p style={{color:"#ff2d78",fontSize:11,marginTop:4,fontFamily:"'Fira Code',monospace"}}>{errors.pts}</p>}
           </div>
 
@@ -470,13 +513,13 @@ function EnterScores({allEntries,setAllEntries,setToast}){
             <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#39ff14"}}>{today}</span>
           </div>
 
-          <button onClick={submit} disabled={saving||!inputOpen||maxedOut} style={{width:"100%",padding:12,borderRadius:10,border:"none",
-            cursor:saving||!inputOpen||maxedOut?"not-allowed":"pointer",
-            background:saving||maxedOut?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
-            color:saving||maxedOut?"rgba(255,255,255,0.3)":"#000",
+          <button onClick={submit} disabled={saving||!inputOpen||maxedOut||onCooldown} style={{width:"100%",padding:12,borderRadius:10,border:"none",
+            cursor:saving||!inputOpen||maxedOut||onCooldown?"not-allowed":"pointer",
+            background:saving||maxedOut||onCooldown?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
+            color:saving||maxedOut||onCooldown?"rgba(255,255,255,0.3)":"#000",
             fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1,
             display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
-            {saving?<><Spinner/> SAVING...</>:maxedOut?"🚫 MAX ATTEMPTS REACHED":"SUBMIT SCORE ⚡"}
+            {saving?<><Spinner/> SAVING...</>:maxedOut?"🚫 MAX ATTEMPTS REACHED":onCooldown?`⏳ WAIT ${cooldownLabel}`:"SUBMIT SCORE ⚡"}
           </button>
         </Glass>
 
