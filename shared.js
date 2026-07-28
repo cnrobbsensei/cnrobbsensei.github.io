@@ -179,7 +179,7 @@
       return snap.val() || {};
     },
     async setBreak(usernameKey, on){
-      if(on){ await db.ref(`games/onBreak/${usernameKey}`).set({startedAt: Date.now()}); }
+      if(on){ await db.ref(`games/onBreak/${usernameKey}`).set({startedAt: firebase.database.ServerValue.TIMESTAMP}); }
       else{ await db.ref(`games/onBreak/${usernameKey}`).remove(); }
     },
     // Realtime listener — fires immediately whenever ANY window changes break
@@ -328,6 +328,13 @@
   // -------------------------------------------------------------------------
   window.SESSION_HOURS = 2;
   window.SESSION_MS = window.SESSION_HOURS*60*60*1000;
+
+  // Minimum time a Sensei must wait between two Points entries for the SAME
+  // ninja (regardless of which day each entry is logged against — this is a
+  // real-world "don't double-enter the same kid back to back" cooldown, not
+  // a per-day rule). Used by entrygames.html.
+  window.ENTRY_COOLDOWN_MINUTES = 20;
+  window.ENTRY_COOLDOWN_MS = window.ENTRY_COOLDOWN_MINUTES*60*1000;
   const HEARTBEAT_MS = 20*1000; // how often an open tab "checks in"
   const STALE_MS = 45*1000;     // how long before a dead session can be taken over
 
