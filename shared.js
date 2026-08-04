@@ -194,6 +194,44 @@
   };
 
   // -------------------------------------------------------------------------
+  // Session locks — set by a Sensei when they hit "End Session" from
+  // "In The Dojo". A locked account is signed out immediately (via
+  // forcedLogouts, same as before) AND is blocked from logging back in at
+  // all until a Sensei explicitly presses "Unlock Session". This is
+  // stronger than the old End Session, which only kicked someone out but
+  // let them log right back in if they still had Points access.
+  // -------------------------------------------------------------------------
+  window.fbSessionLock = {
+    async getAll(){
+      const snap = await db.ref("sessionLocks").once("value");
+      return snap.val() || {};
+    },
+    async lock(accountKey){
+      if(!accountKey) return;
+      await db.ref(`sessionLocks/${accountKey}`).set({lockedAt: Date.now()});
+    },
+    async unlock(accountKey){
+      if(!accountKey) return;
+      await db.ref(`sessionLocks/${accountKey}`).remove();
+    },
+    async isLocked(accountKey){
+      if(!accountKey) return false;
+      try{
+        const snap = await db.ref(`sessionLocks/${accountKey}`).once("value");
+        return snap.exists();
+      }catch(e){ return false; }
+    },
+    // Realtime listener so "In The Dojo" flips a card to "Unlock Session"
+    // the instant a lock is set/cleared, from any window.
+    listen(callback){
+      const ref = db.ref("sessionLocks");
+      const handler = snap => callback(snap.val() || {});
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
+    }
+  };
+
+  // -------------------------------------------------------------------------
   // Project Goals — per-ninja goal + curriculum section, set by Senseis from
   // "In The Dojo" and mirrored live onto the Kiosk display for a second
   // monitor. Keyed by the same cnKeySafe account key used everywhere else
@@ -428,6 +466,8 @@
       const found = await this.findActivePointsEntry(name);
       if(!found.ok) return found;
       const accountKey = window.cnKeySafe(found.matchedName);
+      const locked = await window.fbSessionLock.isLocked(accountKey);
+      if(locked) return {ok:false, reason:"locked"};
       const banned = await window.fbModeration.isBanned(accountKey);
       if(banned) return {ok:false, reason:"banned"};
       const claim = await this.claimAccount(accountKey);
@@ -486,12 +526,22 @@
 
     // Lets an admin immediately end a specific ninja's active session from
     // another device (e.g. "In The Dojo"). Frees up their login slot right
-    // away, and sets a flag the ninja's own tab picks up within ~20s to log
-    // them out automatically.
+    // away, sets a flag the ninja's own tab picks up within ~20s to log
+    // them out automatically (belt-and-suspenders alongside the immediate
+    // client-side logout below), and locks the account so it can't be
+    // logged back into until a Sensei presses "Unlock Session".
     async endSession(accountKey){
       if(!accountKey) return;
       try{ await db.ref(`activeSessions/${accountKey}`).remove(); }catch(e){}
+      try{ await db.ref(`sessionLocks/${accountKey}`).set({lockedAt: Date.now()}); }catch(e){}
       try{ await db.ref(`forcedLogouts/${accountKey}`).set(Date.now()); }catch(e){}
+    },
+
+    // Reverses endSession's lock, letting the ninja log back in (assuming
+    // they still otherwise have valid Points access).
+    async unlockSession(accountKey){
+      if(!accountKey) return;
+      try{ await db.ref(`sessionLocks/${accountKey}`).remove(); }catch(e){}
     }
   };
 
@@ -517,6 +567,10 @@
           try{
             const banned = await window.fbModeration.isBanned(s.accountKey);
             if(banned){ window.cnSession.logout("inappropriate"); return; }
+          }catch(e){}
+          try{
+            const locked = await window.fbSessionLock.isLocked(s.accountKey);
+            if(locked){ window.cnSession.logout("session_ended"); return; }
           }catch(e){}
           try{
             const forced = await db.ref(`forcedLogouts/${s.accountKey}`).once("value");
