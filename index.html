@@ -109,6 +109,7 @@ const REASON_HINTS = {
   not_entered: "That name hasn't been entered into Points today. Ask your Sensei to add you, then log in again.",
   expired: "Your 2-hour access window has closed. Ask your Sensei to add you to Points again to log back in.",
   already_logged_in: "That account is already signed in somewhere else. Log out there first, or ask your Sensei for help.",
+  locked: "Your Sensei has locked this account. You can't log back in until they unlock it.",
   empty: "Enter your username or the Sensei password.",
   error: "Couldn't reach the dojo servers. Check your connection and try again.",
 };
@@ -125,7 +126,7 @@ function LoginScreen({onLogin}){
     const reason = params.get("reason");
     if(reason==="expired") setHint("You were signed out — your 2-hour Points access window closed.");
     else if(reason==="logged_out_elsewhere") setHint("You were signed out because your account was logged in elsewhere.");
-    else if(reason==="session_ended") setHint("Your Sensei ended your session. Ask them if you need to log back in.");
+    else if(reason==="session_ended") setHint("Your Sensei ended and locked your session. You can't log back in until they unlock it.");
   },[]);
 
   async function attempt(){
