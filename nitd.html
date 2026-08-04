@@ -269,7 +269,7 @@ function GoalEditor({account,current}){
   );
 }
 
-function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,refreshing,onBreakChanged}){
+function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefresh,refreshing,onBreakChanged}){
   const today = window.todayStr();
   const todayEntries = allEntries.filter(e=>e.date===today);
   const [togglingAccount,setTogglingAccount]=useState(null);
@@ -321,7 +321,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
       alert("This site's shared.js is out of date and doesn't have the End Session feature yet — please update shared.js (and reload) and try again.");
       return;
     }
-    if(!window.confirm(`End ${account}'s session now? They'll be signed out immediately and can log back in right away if they still have access.`)) return;
+    if(!window.confirm(`End ${account}'s session now? They'll be signed out immediately and won't be able to log back in until you press "Unlock Session".`)) return;
     const pw = window.prompt(`Enter Sensei password to end the session for ${account}:`);
     if(pw===null) return;
     if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
@@ -331,6 +331,24 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
       await onRefresh();
     } catch(e){ console.warn(e); alert("Something went wrong ending the session: "+(e&&e.message?e.message:e)); }
     setEndingAccount(null);
+  }
+
+  const [unlockingAccount,setUnlockingAccount]=useState(null);
+  async function handleUnlockSession(account){
+    if(!account || unlockingAccount) return;
+    if(!window.cnSession || typeof window.cnSession.unlockSession !== "function"){
+      alert("This site's shared.js is out of date and doesn't have the Unlock Session feature yet — please update shared.js (and reload) and try again.");
+      return;
+    }
+    const pw = window.prompt(`Enter Sensei password to unlock ${account}'s account:`);
+    if(pw===null) return;
+    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
+    setUnlockingAccount(account);
+    try{
+      await window.cnSession.unlockSession(window.cnKeySafe(account));
+      await onRefresh();
+    } catch(e){ console.warn(e); alert("Something went wrong unlocking the session: "+(e&&e.message?e.message:e)); }
+    setUnlockingAccount(null);
   }
 
   return(
@@ -390,6 +408,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
             const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.BREAK_DURATION_MS-nowTick)/60000)) : 0;
             const accessRemainingMs = Math.max(0,(p.lastSeen+window.SESSION_MS)-nowTick);
             const accessRemainingMin = Math.ceil(accessRemainingMs/60000);
+            const locked = account ? !!(locks && locks[window.cnKeySafe(account)]) : false;
             return(
               <Glass key={p.name} style={{padding:"16px 18px",borderColor:"rgba(57,255,20,0.2)",
                 animation:`fadeUp .35s ease both ${i*.04}s`}}>
@@ -418,6 +437,11 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
                 <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:accessRemainingMin<=15?"#ff2d78":"rgba(255,255,255,0.3)"}}>
                   🔑 login access: {accessRemainingMin}m left
                 </div>
+                {locked&&(
+                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#ff2d78",fontWeight:700,marginTop:2}}>
+                    🔒 locked by Sensei — can't log back in
+                  </div>
+                )}
                 {isAdmin?(
                   <GoalEditor account={account} current={account?goals[window.cnKeySafe(account)]:null}/>
                 ):(account && goals[window.cnKeySafe(account)] && goals[window.cnKeySafe(account)].goal)?(
@@ -440,16 +464,29 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,isAdmin,onRefresh,ref
                         fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5,marginBottom:8}}>
                       {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?`⏹ End Break (${remainingMin}m left)`:"▶ Start Break"}
                     </button>
-                    <button onClick={()=>handleEndSession(account)}
-                      disabled={!account||endingAccount===account}
-                      style={{width:"100%",padding:"8px",borderRadius:8,
-                        border:!account?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,45,120,0.4)",
-                        cursor:(!account||endingAccount===account)?"not-allowed":"pointer",
-                        background:!account?"rgba(255,255,255,0.03)":"rgba(255,45,120,0.1)",
-                        color:!account?"rgba(255,255,255,0.25)":"#ff2d78",
-                        fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
-                      {endingAccount===account?"...":!account?"⛔ No Account Linked":"⛔ End Session"}
-                    </button>
+                    {locked?(
+                      <button onClick={()=>handleUnlockSession(account)}
+                        disabled={!account||unlockingAccount===account}
+                        style={{width:"100%",padding:"8px",borderRadius:8,
+                          border:"1px solid rgba(57,255,20,0.4)",
+                          cursor:(!account||unlockingAccount===account)?"not-allowed":"pointer",
+                          background:"rgba(57,255,20,0.12)",
+                          color:"#39ff14",
+                          fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
+                        {unlockingAccount===account?"...":"🔓 Unlock Session"}
+                      </button>
+                    ):(
+                      <button onClick={()=>handleEndSession(account)}
+                        disabled={!account||endingAccount===account}
+                        style={{width:"100%",padding:"8px",borderRadius:8,
+                          border:!account?"1px solid rgba(255,255,255,0.1)":"1px solid rgba(255,45,120,0.4)",
+                          cursor:(!account||endingAccount===account)?"not-allowed":"pointer",
+                          background:!account?"rgba(255,255,255,0.03)":"rgba(255,45,120,0.1)",
+                          color:!account?"rgba(255,255,255,0.25)":"#ff2d78",
+                          fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
+                        {endingAccount===account?"...":!account?"⛔ No Account Linked":"⛔ End Session"}
+                      </button>
+                    )}
                   </>
                 )}
               </Glass>
@@ -467,6 +504,7 @@ function NITDApp(){
   const [usernames,setUsernames]=useState([]);
   const [breakStatuses,setBreakStatuses]=useState({});
   const [goals,setGoals]=useState({});
+  const [locks,setLocks]=useState({});
   const [loading,setLoading]=useState(true);
   const [refreshing,setRefreshing]=useState(false);
   const isMobile=useIsMobile();
@@ -509,6 +547,15 @@ function NITDApp(){
     return unsub;
   },[auth]);
 
+  // Session locks are also kept live so a card flips to "Unlock Session"
+  // immediately after End Session is pressed (from this tab or another).
+  useEffect(()=>{
+    if(!auth) return;
+    if(!window.fbSessionLock || typeof window.fbSessionLock.listen !== "function") return;
+    const unsub = window.fbSessionLock.listen(setLocks);
+    return unsub;
+  },[auth]);
+
   if(!auth||loading) return <LoadingScreen status="Checking the dojo..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
 
@@ -522,7 +569,7 @@ function NITDApp(){
           :<Sidebar active="nitd" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
         }
         <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
-          <NITDTab allEntries={allEntries} usernames={usernames} breakStatuses={breakStatuses} goals={goals}
+          <NITDTab allEntries={allEntries} usernames={usernames} breakStatuses={breakStatuses} goals={goals} locks={locks}
             isAdmin={isAdmin} onRefresh={()=>load(true)} refreshing={refreshing} onBreakChanged={reloadBreakStatuses}/>
         </div>
       </div>
