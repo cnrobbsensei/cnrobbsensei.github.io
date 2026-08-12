@@ -106,6 +106,59 @@ function iStyle(err){
   return{width:"100%",background:"rgba(255,255,255,0.06)",border:`1px solid ${err?"#ff2d78":"rgba(255,255,255,0.15)"}`,
     borderRadius:10,padding:"11px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:14,outline:"none",boxSizing:"border-box",transition:"border-color .2s"};
 }
+function spokenNumber(value){
+  const raw=String(value||"").toLowerCase().replace(/,/g,"").trim();
+  if(/^\d+$/.test(raw)) return Number(raw);
+  const small={zero:0,one:1,two:2,three:3,four:4,five:5,six:6,seven:7,eight:8,nine:9,ten:10,
+    eleven:11,twelve:12,thirteen:13,fourteen:14,fifteen:15,twenty:20,thirty:30,fourty:40,forty:40,
+    fifty:50,hundred:100,thousand:1000};
+  if(Object.prototype.hasOwnProperty.call(small,raw)) return small[raw];
+  const parts=raw.split(/\s|-+/).filter(Boolean);
+  if(parts.length===2 && small[parts[0]]!=null && small[parts[1]]!=null) return small[parts[0]]+small[parts[1]];
+  return NaN;
+}
+function parseVoiceScoreCommand(transcript){
+  const text=String(transcript||"").toLowerCase().replace(/\s+/g," ").trim();
+  let match=text.match(/^log\s+(.+?)\s+for\s+(one|two|1|2)\s+(?:hour|hours|hr|hrs)\s+with\s+([\d,]+|[a-z -]+?)\s+points?\s*$/i);
+  if(match){
+    const points=spokenNumber(match[3]);
+    if(Number.isFinite(points)) return {name:match[1].trim(),hours:Number(match[2])===1?1:2,points};
+  }
+  match=text.match(/^add\s+([\d,]+|[a-z -]+?)\s+(?:points?\s+)?to\s+(.+?)\s*$/i);
+  if(match){
+    const points=spokenNumber(match[1]);
+    if(Number.isFinite(points)) return {name:match[2].trim(),hours:2,points};
+  }
+  return null;
+}
+function voiceNameKey(value){
+  return String(value||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+}
+function editDistance(a,b){
+  const row=Array.from({length:b.length+1},(_,i)=>i);
+  for(let i=1;i<=a.length;i++){
+    let previous=row[0]; row[0]=i;
+    for(let j=1;j<=b.length;j++){
+      const current=row[j];
+      row[j]=Math.min(row[j]+1,row[j-1]+1,previous+(a[i-1]===b[j-1]?0:1));
+      previous=current;
+    }
+  }
+  return row[b.length];
+}
+function closestVoiceName(spoken,usernames){
+  const target=voiceNameKey(spoken);
+  if(!target||!usernames.length) return null;
+  return usernames.map(username=>{
+    const first=String(username).split(".")[0];
+    const candidate=voiceNameKey(first);
+    const distance=editDistance(target,candidate);
+    let score=1-(distance/Math.max(target.length,candidate.length,1));
+    if(candidate===target) score=1;
+    else if(candidate.startsWith(target)||target.startsWith(candidate)) score=Math.max(score,.86);
+    return {username,score};
+  }).sort((a,b)=>b.score-a.score)[0];
+}
 function LoadingScreen({status}){
   return(
     <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
@@ -321,15 +374,46 @@ function PersonPickerModal({matches,onSelect,onCancel,busy}){
     </div>
   );
 }
+function VoiceCheckInModal({match, onConfirm, onCancel}){
+  const hasMatch=!!match.username;
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:3000,background:"rgba(0,0,0,.72)",display:"flex",alignItems:"center",justifyContent:"center",padding:18}}>
+      <Glass style={{width:"min(100%,470px)",padding:24,borderColor:hasMatch?"#39ff1466":"#ffd70066",background:"rgba(10,10,18,.98)"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:12,color:hasMatch?"#39ff14":"#ffd700",letterSpacing:1,marginBottom:10}}>
+          {hasMatch?"SIMULATED CHECK-IN MATCH":"NO CONFIDENT NAME MATCH"}
+        </div>
+        <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:18,marginBottom:10}}>{hasMatch?"Website and person found":"Check the spoken name"}</h3>
+        <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,color:"rgba(255,255,255,.65)",lineHeight:1.6,marginBottom:16}}>
+          Spoken: <strong style={{color:"#fff"}}>{match.spoken}</strong><br/>
+          {hasMatch?<>Closest database match: <strong style={{color:"#39ff14"}}>{match.username}</strong><br/>Match confidence: <strong style={{color:"#00cfff"}}>{Math.round(match.score*100)}%</strong></>:<>No database name was close enough to select automatically. You can use the spoken name manually.</>}
+          <br/>Requested access: <strong style={{color:"#ffd700"}}>{match.hours} hour{match.hours===1?"":"s"}</strong> · Points: <strong style={{color:"#ffd700"}}>{match.points}</strong>
+        </p>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,.38)",background:"rgba(0,207,255,.07)",border:"1px solid #00cfff33",borderRadius:9,padding:"10px 12px",lineHeight:1.55,marginBottom:18}}>
+          TEST MODE: this does not open or submit to the attendance portal. It only simulates finding the website and person so you can safely test the voice flow.
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={onCancel} style={{flex:1,padding:11,borderRadius:9,border:"1px solid rgba(255,255,255,.16)",background:"rgba(255,255,255,.05)",color:"rgba(255,255,255,.65)",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>CANCEL</button>
+          <button onClick={onConfirm} style={{flex:1,padding:11,borderRadius:9,border:"none",background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",cursor:"pointer",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10}}>{hasMatch?"USE MATCH":"USE SPOKEN NAME"}</button>
+        </div>
+      </Glass>
+    </div>
+  );
+}
 
 function EnterScores({allEntries,setAllEntries,setToast}){
   const [name,setName]=useState("");
   const [pts,setPts]=useState("");
+  const [sessionHours,setSessionHours]=useState(2);
   const [errors,setErrors]=useState({});
   const [saving,setSaving]=useState(false);
   const [deleting,setDeleting]=useState(null);
   const [usernames,setUsernames]=useState([]);
   const [pendingChoice,setPendingChoice]=useState(null); // {matches:[...], pts:number}
+  const [listening,setListening]=useState(false);
+  const [voiceText,setVoiceText]=useState("");
+  const [voiceMatch,setVoiceMatch]=useState(null);
+  const [voiceSupported]=useState(()=>!!(window.SpeechRecognition||window.webkitSpeechRecognition));
+  const recognitionRef=React.useRef(null);
   const inputOpen=isInputWindowOpen();
   const cw=window.getCurrentWeek();
   const today=window.todayStr();
@@ -368,18 +452,18 @@ function EnterScores({allEntries,setAllEntries,setToast}){
   const maxedOut=attemptsToday>=MAX_ATTEMPTS_PER_DAY;
   const barColor=attemptsLeft===0?"#ff2d78":attemptsLeft===1?"#ffd700":"#39ff14";
 
-  async function doSubmit(rawName,p){
+  async function doSubmit(rawName,p,hours=sessionHours){
     const normName = window.cnNormalizeName ? window.cnNormalizeName(rawName) : rawName.trim();
     setSaving(true);
     const priorAttempts = getAttemptsToday(allEntries,normName,cw,today);
     try{
-      const result=await window.fbLeaderboard.addEntry(cw,normName,p,today);
-      const newEntry={id:result.id,week:cw,name:normName,points:p,date:today,createdAt:Date.now()};
+      const result=await window.fbLeaderboard.addEntry(cw,normName,p,today,hours);
+      const newEntry={id:result.id,week:cw,name:normName,points:p,date:today,sessionHours:hours,createdAt:Date.now()};
       setAllEntries(prev=>[...prev,newEntry]);
       setPts("");
       setPendingChoice(null);
       const rem=MAX_ATTEMPTS_PER_DAY-(priorAttempts+1);
-      setToast({msg:rem>0?`${normName} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${window.SESSION_HOURS}h`:`${normName} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
+      setToast({msg:rem>0?`${normName} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${hours}h`:`${normName} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
     } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
@@ -397,7 +481,73 @@ function EnterScores({allEntries,setAllEntries,setToast}){
     // Multiple registered usernames share this first name — ask which one
     // before saving anything.
     if(isAmbiguous){ setPendingChoice({matches:candidateMatches,pts:p}); return; }
-    doSubmit(resolvedName,p);
+    doSubmit(resolvedName,p,sessionHours);
+  }
+
+  function applyVoiceCommand(transcript){
+    const parsed=parseVoiceScoreCommand(transcript);
+    if(!parsed){
+      setToast({msg:'Try: “Log Maya for 2 hours with 100 points” or “Add 100 to Maya”.',color:"#ffd700"});
+      return;
+    }
+    const closest=closestVoiceName(parsed.name,usernames);
+    const confident=closest&&closest.score>=.58?closest:null;
+    setVoiceMatch({spoken:parsed.name,username:confident?closest.username:null,score:closest?closest.score:0,points:parsed.points,hours:parsed.hours});
+    setErrors({});
+    setVoiceText(`Checking database for “${parsed.name}”…`);
+  }
+
+  function confirmVoiceMatch(){
+    if(!voiceMatch) return;
+    const selected=voiceMatch.username||voiceMatch.spoken;
+    setName(selected);
+    setPts(String(voiceMatch.points));
+    setSessionHours(voiceMatch.hours);
+    setVoiceText(`Matched: “${selected}” · ready to review and submit.`);
+    setVoiceMatch(null);
+    setToast({msg:`${selected} found. Review the score and press Submit.`,color:"#00cfff"});
+  }
+
+  function toggleVoice(){
+    if(!voiceSupported){ setToast({msg:"Voice input isn't supported in this browser. You can still use the form.",color:"#ffd700"}); return; }
+    const secureHost=window.location.hostname==="localhost"||window.location.hostname==="127.0.0.1";
+    if(window.isSecureContext===false&&!secureHost){
+      const msg="Voice input needs HTTPS or localhost. Open the site securely, then allow microphone access.";
+      setVoiceText(msg);
+      setToast({msg,color:"#ffd700"});
+      return;
+    }
+    if(listening){ if(recognitionRef.current) recognitionRef.current.stop(); setListening(false); return; }
+    const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+    const recognition=new Recognition();
+    recognition.lang="en-US";
+    recognition.interimResults=false;
+    recognition.maxAlternatives=1;
+    recognition.onstart=()=>{setListening(true);setVoiceText("Listening…");};
+    recognition.onresult=e=>{const heard=e.results[0][0].transcript;setVoiceText(`Heard: “${heard}”`);applyVoiceCommand(heard);};
+    recognition.onerror=e=>{
+      const messages={
+        "not-allowed":"Microphone access was blocked. Allow the microphone in your browser’s address-bar settings, then try again.",
+        "service-not-allowed":"The browser speech service is unavailable. Try Chrome or Edge over HTTPS.",
+        "audio-capture":"No microphone was found, or another app is using it.",
+        "network":"This browser’s speech service is unavailable. Try Chrome or Edge on the HTTPS site, or use the score form below.",
+        "no-speech":"I didn’t hear anything. Tap again and speak clearly.",
+        "aborted":"Voice input was stopped. Tap again when you’re ready."
+      };
+      const message=messages[e.error]||`Voice input failed (${e.error||"unknown error"}). Try again or use the form.`;
+      setVoiceText(message);
+      setToast({msg:message,color:"#ffd700"});
+      setListening(false);
+    };
+    recognition.onend=()=>{recognitionRef.current=null;setListening(false);};
+    recognitionRef.current=recognition;
+    try{ recognition.start(); }
+    catch(e){
+      recognitionRef.current=null;
+      setListening(false);
+      setVoiceText("Voice input could not start. Check microphone permissions and try again.");
+      setToast({msg:"Voice input could not start. Check microphone permissions and try again.",color:"#ffd700"});
+    }
   }
 
   async function deleteEntry(entry){
@@ -421,6 +571,17 @@ function EnterScores({allEntries,setAllEntries,setToast}){
         </p>
       </div>
 
+      <Glass style={{padding:"14px 16px",marginBottom:24,borderColor:listening?"#39ff14":"rgba(0,207,255,0.25)"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#00cfff",letterSpacing:1,marginBottom:5}}>VOICE ENTRY</div>
+            <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.6)"}}>{voiceText||"Say “Log Maya for 2 hours with 100 points”"}</div>
+          </div>
+          <button onClick={toggleVoice} style={{padding:"10px 16px",borderRadius:10,border:`1px solid ${listening?"#39ff14":"#00cfff55"}`,background:listening?"rgba(57,255,20,0.14)":"rgba(0,207,255,0.1)",color:listening?"#39ff14":"#00cfff",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11,letterSpacing:1}}>{listening?"■ STOP LISTENING":"🎙 USE VOICE"}</button>
+        </div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.35)",marginTop:8}}>Also supported: “Add 100 to Maya”. Voice checks the database for the closest name, then asks you to confirm before filling the form.</div>
+      </Glass>
+
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:24}}>
         <Glass style={{padding:22}}>
           <div style={{marginBottom:14}}>
@@ -434,6 +595,13 @@ function EnterScores({allEntries,setAllEntries,setToast}){
             ):(exactUsernameMatch||candidateMatches.length===1)?(
               <p style={{color:"#39ff14",fontSize:10,marginTop:5,fontFamily:"'Fira Code',monospace"}}>🔗 Linked to {resolvedName}</p>
             ):null)}
+          </div>
+
+          <div style={{marginBottom:14}}>
+            <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>LOGIN ACCESS WINDOW</label>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[1,2].map(hours=><button key={hours} type="button" onClick={()=>setSessionHours(hours)} style={{padding:"10px",borderRadius:9,border:`1px solid ${sessionHours===hours?"#39ff14":"rgba(255,255,255,0.15)"}`,background:sessionHours===hours?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.04)",color:sessionHours===hours?"#39ff14":"rgba(255,255,255,0.55)",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>{hours} HOUR{hours===1?"":"S"}</button>)}
+            </div>
           </div>
 
           {name.trim()&&(
@@ -527,6 +695,7 @@ function EnterScores({allEntries,setAllEntries,setToast}){
           onSelect={u=>doSubmit(u,pendingChoice.pts)}
           onCancel={()=>{if(!saving)setPendingChoice(null);}}/>
       )}
+      {voiceMatch&&<VoiceCheckInModal match={voiceMatch} onConfirm={confirmVoiceMatch} onCancel={()=>setVoiceMatch(null)}/>}
     </div>
   );
 }

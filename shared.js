@@ -75,9 +75,10 @@
     },
     // createdAt is a real timestamp — it's what powers the "only logged in
     // within the last 2 hours" login window and the live In The Dojo view.
-    async addEntry(week,name,points,date){
+    async addEntry(week,name,points,date,sessionHours){
       const ref = db.ref(`leaderboards/week_${week}/entries`).push();
-      await ref.set({week,name,points,date,createdAt:Date.now()});
+      const cleanHours = Number(sessionHours) === 1 ? 1 : 2;
+      await ref.set({week,name,points,date,sessionHours:cleanHours,createdAt:Date.now()});
       return {id:ref.key};
     },
     async deleteEntry(week,entryId){
@@ -422,12 +423,15 @@
         return stored === firstName || stored === fullTyped;
       });
       if(matches.length === 0) return {ok:false, reason:"not_entered"};
-      const mostRecent = matches.reduce((m,e)=>Math.max(m, e.createdAt || 0), 0);
+      const mostRecentEntry = matches.reduce((latest,e)=>(e.createdAt||0) > (latest.createdAt||0) ? e : latest, {createdAt:0});
+      const mostRecent = mostRecentEntry.createdAt || 0;
       if(!mostRecent) return {ok:false, reason:"not_entered"};
-      if(Date.now() - mostRecent > window.SESSION_MS) return {ok:false, reason:"expired"};
+      const sessionHours = Number(mostRecentEntry.sessionHours) === 1 ? 1 : window.SESSION_HOURS;
+      const sessionMs = sessionHours*60*60*1000;
+      if(Date.now() - mostRecent > sessionMs) return {ok:false, reason:"expired"};
       // Keep the full login name (e.g. "nathan.blah") as the matched identity,
       // not just the first name, so accountKey/session/display stay correct.
-      return {ok:true, matchedName: trimmed, enteredAt: mostRecent, expiresAt: mostRecent + window.SESSION_MS};
+      return {ok:true, matchedName: trimmed, enteredAt: mostRecent, sessionHours, expiresAt: mostRecent + sessionMs};
     },
 
     // Claims a single-login "slot" for an account (admin, or a given ninja).
@@ -654,6 +658,11 @@
       window.location.href = first.href;
     },
     isActive(){ return sessionStorage.getItem("cn_tour_active")==="1"; },
+    resume(){
+      const idx = Number(sessionStorage.getItem("cn_tour_step")||0);
+      const tab = window.CN_NAV.find(n=>n.id===window.CN_TOUR_TABS[idx]) || window.CN_NAV[0];
+      window.location.href = tab.href;
+    },
     exit(){
       sessionStorage.removeItem("cn_tour_active");
       sessionStorage.removeItem("cn_tour_role");

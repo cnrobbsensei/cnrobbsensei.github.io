@@ -148,6 +148,8 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
 
 function TutorialLauncher({role}){
   const isAdmin = role==="admin", isGuest = role==="guest";
+  const tourActive = window.cnTour.isActive();
+  const tourStep = Math.min(Number(sessionStorage.getItem("cn_tour_step")||0)+1, window.CN_TOUR_TABS.length);
   return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <Glass style={{padding:"clamp(28px,4vw,44px)",maxWidth:460,textAlign:"center"}}>
@@ -162,11 +164,20 @@ function TutorialLauncher({role}){
             ? "A guided tour of every tab so you know what's there — you're seeing sample data since guests don't see real students."
             : "A guided tour that walks you through every tab and exactly what you can do on each one."}
         </p>
-        <button onClick={()=>window.cnTour.start(role)} style={{padding:"12px 28px",borderRadius:99,border:"none",cursor:"pointer",
+        <div style={{display:"grid",gridTemplateColumns:tourActive?"1fr 1fr":"1fr",gap:8,marginBottom:10}}>
+        {tourActive&&<button onClick={()=>window.cnTour.resume()} style={{padding:"12px 12px",borderRadius:99,border:"1px solid #39ff1466",cursor:"pointer",
+          background:"rgba(57,255,20,0.12)",color:"#39ff14",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:11,letterSpacing:1}}>
+          RESUME · {tourStep}/{window.CN_TOUR_TABS.length}
+        </button>}
+        <button onClick={()=>window.cnTour.start(role)} style={{padding:"12px 12px",borderRadius:99,border:"none",cursor:"pointer",
           background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",
           fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,letterSpacing:1}}>
           ▶ START WALKTHROUGH
         </button>
+        </div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",lineHeight:1.6}}>
+          The walkthrough highlights each tab, explains what you can do there, and moves between pages automatically. You can go back, exit, or resume it later.
+        </div>
         <div style={{marginTop:16}}>
           <button onClick={()=>window.location.href="home.html"} style={{padding:"9px 18px",borderRadius:10,
             border:"1px solid rgba(255,255,255,0.12)",background:"transparent",color:"rgba(255,255,255,0.4)",
