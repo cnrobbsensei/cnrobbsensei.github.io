@@ -52,22 +52,37 @@ window.fbGames = {
     const val = snap.val() || {};
     return Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score).slice(0,5);
   },
-  async submitScore(gameId,name,score){
-    const ref = window.cnDb.ref(`games/${gameId}/leaderboard`).push();
-    const ts = Date.now();
-    await ref.set({name,score,ts});
-    const snap = await window.cnDb.ref(`games/${gameId}/leaderboard`).once("value");
-    const val = snap.val() || {};
-    const entries = Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score);
-    if(entries.length>5){
-      const toDelete = entries.slice(5);
-      await Promise.all(toDelete.map(e=>window.cnDb.ref(`games/${gameId}/leaderboard/${e.id}`).remove()));
-    }
-    const top5 = entries.slice(0,5);
-    const madeIt = top5.some(e=>e.ts===ts && e.name===name && e.score===score);
-    return {top5,madeIt};
+// One entry PER PLAYER: each player's row is keyed off their (trimmed,
+// lowercased) name instead of a random push() id, so replaying never adds
+// extra rows — it can only raise that player's own best score. Only the
+// single highest score any given person has ever gotten counts toward the
+// leaderboard / top 5.
+async submitScore(gameId, name, score){
+  const cleanName = name.trim();
+  const key = window.cnKeySafe(cleanName.toLowerCase());
+  const entryRef = window.cnDb.ref(`games/${gameId}/leaderboard/${key}`);
+
+  const existingSnap = await entryRef.once("value");
+  const existing = existingSnap.val();
+  const isNewPersonalBest = !existing || score > existing.score;
+
+  if(isNewPersonalBest){
+    await entryRef.set({name: cleanName, score, ts: Date.now()});
   }
-};
+
+  const snap = await window.cnDb.ref(`games/${gameId}/leaderboard`).once("value");
+  const val = snap.val() || {};
+  const entries = Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score);
+
+  if(entries.length > 5){
+    const toDelete = entries.slice(5);
+    await Promise.all(toDelete.map(e => window.cnDb.ref(`games/${gameId}/leaderboard/${e.id}`).remove()));
+  }
+
+  const top5 = entries.slice(0, 5);
+  const madeIt = top5.some(e => e.id === key);
+  return {top5, madeIt};
+}
 </script>
 <script type="text/babel">
 const {useState,useEffect,useRef} = React;
