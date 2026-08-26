@@ -319,7 +319,7 @@ function KioskApp(){
       const section = window.CN_SECTIONS.includes(g.section) ? g.section : window.CN_SECTIONS[0];
       const breakEntry = breaks[key];
       const onBreak = window.cnIsBreakActive(breakEntry);
-      const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.BREAK_DURATION_MS-nowTick)/60000)) : 0;
+      const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.cnBreakDurationMs(breakEntry)-nowTick)/60000)) : 0;
       map[section].push({key,name:g.name,goal:(g.goal||"").trim(),onBreak,remainingMin});
     });
     Object.values(map).forEach(list=>list.sort((a,b)=>a.name.localeCompare(b.name)));

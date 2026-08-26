@@ -170,17 +170,32 @@
   // -------------------------------------------------------------------------
   // Per-student break flags (set from "In The Dojo", used by Games)
   // -------------------------------------------------------------------------
-  window.BREAK_DURATION_MS = 10*60*1000; // 10 minutes
+  window.BREAK_DURATION_MS = 10*60*1000; // default/fallback duration (10 minutes)
+  // Selectable break lengths (minutes) shown as options when a Sensei starts a break.
+  window.BREAK_DURATION_OPTIONS_MIN = [5, 10, 15, 20, 30, 45, 60];
+  // Returns the duration (ms) that applies to a given break entry — per-break
+  // durationMs if one was set, otherwise the default. Keeps old entries
+  // (saved before duration selection existed) working correctly.
+  window.cnBreakDurationMs = function(entry){
+    const d = Number(entry && entry.durationMs);
+    return (d > 0) ? d : window.BREAK_DURATION_MS;
+  };
   window.cnIsBreakActive = function(entry){
-    return !!(entry && entry.startedAt && (Date.now()-entry.startedAt < window.BREAK_DURATION_MS));
+    if(!entry || !entry.startedAt) return false;
+    return (Date.now()-entry.startedAt) < window.cnBreakDurationMs(entry);
   };
   window.fbBreak = {
     async getAll(){
       const snap = await db.ref("games/onBreak").once("value");
       return snap.val() || {};
     },
-    async setBreak(usernameKey, on){
-      if(on){ await db.ref(`games/onBreak/${usernameKey}`).set({startedAt: firebase.database.ServerValue.TIMESTAMP}); }
+    // durationMs is optional — defaults to window.BREAK_DURATION_MS when omitted
+    // (or when ending a break, where it's irrelevant).
+    async setBreak(usernameKey, on, durationMs){
+      if(on){
+        const cleanDuration = (Number(durationMs) > 0) ? Number(durationMs) : window.BREAK_DURATION_MS;
+        await db.ref(`games/onBreak/${usernameKey}`).set({startedAt: firebase.database.ServerValue.TIMESTAMP, durationMs: cleanDuration});
+      }
       else{ await db.ref(`games/onBreak/${usernameKey}`).remove(); }
     },
     // Realtime listener — fires immediately whenever ANY window changes break
@@ -576,17 +591,26 @@
             const locked = await window.fbSessionLock.isLocked(s.accountKey);
             if(locked){ window.cnSession.logout("session_ended"); return; }
           }catch(e){}
-          try{
-            const forced = await db.ref(`forcedLogouts/${s.accountKey}`).once("value");
-            if(forced.exists()){
-              try{ await db.ref(`forcedLogouts/${s.accountKey}`).remove(); }catch(e2){}
-              window.cnSession.logout("session_ended");
-              return;
-            }
-          }catch(e){}
         }
       }, 20000);
       return ()=>clearInterval(iv);
+    },[]);
+    // Realtime "End Session" trigger — instead of waiting on the 20s poll
+    // above, this listens live on forcedLogouts/<accountKey> so a Sensei
+    // pressing "End Session" from another window kicks this tab out the
+    // instant Firebase pushes the change (typically well under a second),
+    // not up to 20 seconds later.
+    React.useEffect(()=>{
+      const s = window.cnSession.getSession();
+      if(!s || s.role !== "student" || !s.accountKey) return;
+      const ref = db.ref(`forcedLogouts/${s.accountKey}`);
+      const handler = snap => {
+        if(!snap.exists()) return;
+        try{ ref.remove(); }catch(e){}
+        window.cnSession.logout("session_ended");
+      };
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
     },[]);
     return {auth, ready};
   };

@@ -46,7 +46,7 @@ function findLinkedAccount(firstName, usernames){
   return match || null;
 }
 
-// Drops any break flags that have passed the 10-minute mark, and best-effort
+// Drops any break flags that have passed their duration, and best-effort
 // clears them out of Firebase so other admins see "Start Break" again.
 function cleanExpiredBreaks(breaks){
   const cleaned = {};
@@ -301,14 +301,20 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
     .sort((a,b)=>b.lastSeen-a.lastSeen);
   const expiredCount = allToday.length - present.length;
 
+  // Per-ninja selected break length (minutes), used only when starting a break.
+  const [breakMinutes,setBreakMinutes]=useState({}); // {account: minutes}
+  function getBreakMinutes(account){ return breakMinutes[account] || 10; }
+  function setBreakMinutesFor(account, minutes){ setBreakMinutes(prev=>({...prev,[account]:minutes})); }
+
   async function handleBreakToggle(account, currentlyOn){
     if(!account || togglingAccount) return;
-    const pw = window.prompt(`Enter Sensei password to ${currentlyOn?"end":"start"} break for ${account}:`);
+    const durationMin = currentlyOn ? null : getBreakMinutes(account);
+    const pw = window.prompt(`Enter Sensei password to ${currentlyOn?"end":`start a ${durationMin}-minute`} break for ${account}:`);
     if(pw===null) return;
     if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
     setTogglingAccount(account);
     try{
-      await window.fbBreak.setBreak(window.cnKeySafe(account), !currentlyOn);
+      await window.fbBreak.setBreak(window.cnKeySafe(account), !currentlyOn, currentlyOn ? undefined : durationMin*60*1000);
       await onBreakChanged();
     } catch(e){ console.warn(e); alert("Something went wrong updating break status. Please try again."); }
     setTogglingAccount(null);
@@ -321,7 +327,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
       alert("This site's shared.js is out of date and doesn't have the End Session feature yet — please update shared.js (and reload) and try again.");
       return;
     }
-    if(!window.confirm(`End ${account}'s session now? They'll be signed out immediately and won't be able to log back in until you press "Unlock Session".`)) return;
+    if(!window.confirm(`End ${account}'s session immediately? They'll be signed out right away (even mid-page) and won't be able to log back in until you press "Unlock Session".`)) return;
     const pw = window.prompt(`Enter Sensei password to end the session for ${account}:`);
     if(pw===null) return;
     if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
@@ -405,7 +411,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
             const account = findLinkedAccount(p.name, usernames);
             const breakEntry = account ? breakStatuses[window.cnKeySafe(account)] : null;
             const onBreak = window.cnIsBreakActive(breakEntry);
-            const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.BREAK_DURATION_MS-nowTick)/60000)) : 0;
+            const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.cnBreakDurationMs(breakEntry)-nowTick)/60000)) : 0;
             const accessRemainingMs = Math.max(0,(p.lastSeen+window.SESSION_MS)-nowTick);
             const accessRemainingMin = Math.ceil(accessRemainingMs/60000);
             const locked = account ? !!(locks && locks[window.cnKeySafe(account)]) : false;
@@ -455,6 +461,20 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
                 <div style={{marginTop:isAdmin?8:0}}/>
                 {isAdmin&&(
                   <>
+                    {!onBreak&&account&&(
+                      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
+                        {window.BREAK_DURATION_OPTIONS_MIN.map(min=>(
+                          <button key={min} type="button" onClick={()=>setBreakMinutesFor(account,min)}
+                            style={{flex:"1 0 auto",padding:"4px 7px",borderRadius:6,cursor:"pointer",
+                              border:`1px solid ${getBreakMinutes(account)===min?"#39ff14":"rgba(255,255,255,0.15)"}`,
+                              background:getBreakMinutes(account)===min?"rgba(57,255,20,0.14)":"rgba(255,255,255,0.04)",
+                              color:getBreakMinutes(account)===min?"#39ff14":"rgba(255,255,255,0.5)",
+                              fontFamily:"'Fira Code',monospace",fontSize:9,fontWeight:700}}>
+                            {min}m
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     <button onClick={()=>handleBreakToggle(account,onBreak)}
                       disabled={!account||togglingAccount===account}
                       style={{width:"100%",padding:"8px",borderRadius:8,border:"none",
@@ -462,7 +482,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
                         background:!account?"rgba(255,255,255,0.06)":onBreak?"linear-gradient(135deg,#ff2d78,#ff8c00)":"linear-gradient(135deg,#39ff14,#00cfff)",
                         color:!account?"rgba(255,255,255,0.3)":"#000",
                         fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5,marginBottom:8}}>
-                      {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?`⏹ End Break (${remainingMin}m left)`:"▶ Start Break"}
+                      {togglingAccount===account?"...":!account?"🔒 No Account Linked":onBreak?`⏹ End Break (${remainingMin}m left)`:`▶ Start Break (${getBreakMinutes(account)}m)`}
                     </button>
                     {locked?(
                       <button onClick={()=>handleUnlockSession(account)}

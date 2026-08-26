@@ -1465,7 +1465,7 @@ function GamesTab({isAdmin,studentUsername}){
     return unsubscribe;
   },[studentUsername]);
 
-  // Ticks every 5s so a break that hits the 10-minute mark auto-locks even with no new Firebase write.
+  // Ticks every 5s so a break that hits its duration auto-locks even with no new Firebase write.
   useEffect(()=>{
     const iv=setInterval(()=>setNowTick(Date.now()),5000);
     return ()=>clearInterval(iv);
@@ -1473,7 +1473,7 @@ function GamesTab({isAdmin,studentUsername}){
 
   const myBreakOn = window.cnIsBreakActive(breakData);
   const locked = !isAdmin && !myBreakOn;
-  const remainingMs = (myBreakOn && breakData&&breakData.startedAt) ? Math.max(0,(breakData.startedAt+window.BREAK_DURATION_MS)-nowTick) : 0;
+  const remainingMs = (myBreakOn && breakData&&breakData.startedAt) ? Math.max(0,(breakData.startedAt+window.cnBreakDurationMs(breakData))-nowTick) : 0;
   const remainingLabel = remainingMs>0 ? `${Math.floor(remainingMs/60000)}:${String(Math.floor((remainingMs%60000)/1000)).padStart(2,"0")}` : null;
 
   // If a break ends (manually stopped, or it expires) while a game is open, close it and lock immediately.

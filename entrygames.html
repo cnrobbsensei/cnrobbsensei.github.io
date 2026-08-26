@@ -63,6 +63,21 @@ function getAttemptsToday(allEntries, name, week, date){
     e.date === date
   ).length;
 }
+// The login access window (1h/2h) is a once-per-day choice — it's set by
+// whichever entry was logged first for this ninja today, and every later
+// entry that same day reuses it rather than letting it be changed again.
+// Returns null when there's no entry for them yet today.
+function getLockedSessionHoursToday(allEntries, name, week, date){
+  const todays = allEntries.filter(e =>
+    e && e.name &&
+    e.week === week &&
+    e.name.toLowerCase() === name.trim().toLowerCase() &&
+    e.date === date
+  );
+  if(todays.length === 0) return null;
+  const earliest = todays.reduce((a,b)=>(a.createdAt||0) <= (b.createdAt||0) ? a : b);
+  return Number(earliest.sessionHours) === 1 ? 1 : 2;
+}
 function calcBoard(groupedForWeek){
   return groupedForWeek
     .map(e => ({name:e.name,date:e.date,points:e.points,attempts:e.attempts,ids:e.ids}))
@@ -452,7 +467,18 @@ function EnterScores({allEntries,setAllEntries,setToast}){
   const maxedOut=attemptsToday>=MAX_ATTEMPTS_PER_DAY;
   const barColor=attemptsLeft===0?"#ff2d78":attemptsLeft===1?"#ffd700":"#39ff14";
 
-  async function doSubmit(rawName,p,hours=sessionHours){
+  // Once a ninja already has a Points entry today, their login access window
+  // was locked in by that first entry — later entries the same day can't
+  // change it, so the hour picker becomes read-only and shows the locked value.
+  const lockedHoursToday=previewName?getLockedSessionHoursToday(allEntries,previewName,cw,today):null;
+  const hoursLocked=lockedHoursToday!==null;
+  const effectiveHours=hoursLocked?lockedHoursToday:sessionHours;
+
+  useEffect(()=>{
+    if(hoursLocked && sessionHours!==lockedHoursToday) setSessionHours(lockedHoursToday);
+  },[hoursLocked,lockedHoursToday]);
+
+  async function doSubmit(rawName,p,hours=effectiveHours){
     const normName = window.cnNormalizeName ? window.cnNormalizeName(rawName) : rawName.trim();
     setSaving(true);
     const priorAttempts = getAttemptsToday(allEntries,normName,cw,today);
@@ -481,7 +507,7 @@ function EnterScores({allEntries,setAllEntries,setToast}){
     // Multiple registered usernames share this first name — ask which one
     // before saving anything.
     if(isAmbiguous){ setPendingChoice({matches:candidateMatches,pts:p}); return; }
-    doSubmit(resolvedName,p,sessionHours);
+    doSubmit(resolvedName,p,effectiveHours);
   }
 
   function applyVoiceCommand(transcript){
@@ -599,9 +625,14 @@ function EnterScores({allEntries,setAllEntries,setToast}){
 
           <div style={{marginBottom:14}}>
             <label style={{display:"block",fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.45)",marginBottom:7,letterSpacing:1}}>LOGIN ACCESS WINDOW</label>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {[1,2].map(hours=><button key={hours} type="button" onClick={()=>setSessionHours(hours)} style={{padding:"10px",borderRadius:9,border:`1px solid ${sessionHours===hours?"#39ff14":"rgba(255,255,255,0.15)"}`,background:sessionHours===hours?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.04)",color:sessionHours===hours?"#39ff14":"rgba(255,255,255,0.55)",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>{hours} HOUR{hours===1?"":"S"}</button>)}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,opacity:hoursLocked?0.55:1}}>
+              {[1,2].map(hours=><button key={hours} type="button" disabled={hoursLocked} onClick={()=>setSessionHours(hours)} style={{padding:"10px",borderRadius:9,border:`1px solid ${effectiveHours===hours?"#39ff14":"rgba(255,255,255,0.15)"}`,background:effectiveHours===hours?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.04)",color:effectiveHours===hours?"#39ff14":"rgba(255,255,255,0.55)",cursor:hoursLocked?"not-allowed":"pointer",fontFamily:"'Fira Code',monospace",fontSize:11}}>{hours} HOUR{hours===1?"":"S"}</button>)}
             </div>
+            {hoursLocked&&(
+              <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#ffd700",marginTop:6,lineHeight:1.5}}>
+                🔒 Already set to {lockedHoursToday}h by {previewName}'s first entry today — this can't be changed again until tomorrow.
+              </p>
+            )}
           </div>
 
           {name.trim()&&(
