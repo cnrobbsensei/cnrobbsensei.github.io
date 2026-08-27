@@ -302,9 +302,16 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
   const expiredCount = allToday.length - present.length;
 
   // Per-ninja selected break length (minutes), used only when starting a break.
+  // Defaults to the last preset picked; a custom number can override it too.
   const [breakMinutes,setBreakMinutes]=useState({}); // {account: minutes}
+  const [customBreakInput,setCustomBreakInput]=useState({}); // {account: raw text typed into the custom box}
   function getBreakMinutes(account){ return breakMinutes[account] || 10; }
   function setBreakMinutesFor(account, minutes){ setBreakMinutes(prev=>({...prev,[account]:minutes})); }
+  function setCustomBreakInputFor(account, raw){
+    setCustomBreakInput(prev=>({...prev,[account]:raw}));
+    const n = parseInt(raw,10);
+    if(Number.isFinite(n) && n>0) setBreakMinutesFor(account, Math.min(240,n));
+  }
 
   async function handleBreakToggle(account, currentlyOn){
     if(!account || togglingAccount) return;
@@ -315,6 +322,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
     setTogglingAccount(account);
     try{
       await window.fbBreak.setBreak(window.cnKeySafe(account), !currentlyOn, currentlyOn ? undefined : durationMin*60*1000);
+      if(!currentlyOn) setCustomBreakInputFor(account,"");
       await onBreakChanged();
     } catch(e){ console.warn(e); alert("Something went wrong updating break status. Please try again."); }
     setTogglingAccount(null);
@@ -462,17 +470,30 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
                 {isAdmin&&(
                   <>
                     {!onBreak&&account&&(
-                      <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:6}}>
-                        {window.BREAK_DURATION_OPTIONS_MIN.map(min=>(
-                          <button key={min} type="button" onClick={()=>setBreakMinutesFor(account,min)}
-                            style={{flex:"1 0 auto",padding:"4px 7px",borderRadius:6,cursor:"pointer",
-                              border:`1px solid ${getBreakMinutes(account)===min?"#39ff14":"rgba(255,255,255,0.15)"}`,
-                              background:getBreakMinutes(account)===min?"rgba(57,255,20,0.14)":"rgba(255,255,255,0.04)",
-                              color:getBreakMinutes(account)===min?"#39ff14":"rgba(255,255,255,0.5)",
-                              fontFamily:"'Fira Code',monospace",fontSize:9,fontWeight:700}}>
-                            {min}m
-                          </button>
-                        ))}
+                      <div style={{marginBottom:6}}>
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap",marginBottom:5}}>
+                          {window.BREAK_DURATION_OPTIONS_MIN.map(min=>(
+                            <button key={min} type="button" onClick={()=>{setBreakMinutesFor(account,min);setCustomBreakInputFor(account,"");}}
+                              style={{flex:"1 0 auto",padding:"4px 7px",borderRadius:6,cursor:"pointer",
+                                border:`1px solid ${getBreakMinutes(account)===min&&!customBreakInput[account]?"#39ff14":"rgba(255,255,255,0.15)"}`,
+                                background:getBreakMinutes(account)===min&&!customBreakInput[account]?"rgba(57,255,20,0.14)":"rgba(255,255,255,0.04)",
+                                color:getBreakMinutes(account)===min&&!customBreakInput[account]?"#39ff14":"rgba(255,255,255,0.5)",
+                                fontFamily:"'Fira Code',monospace",fontSize:9,fontWeight:700}}>
+                              {min}m
+                            </button>
+                          ))}
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <input type="number" min="1" max="240" placeholder="Custom min"
+                            value={customBreakInput[account]||""}
+                            onChange={e=>setCustomBreakInputFor(account,e.target.value)}
+                            onClick={e=>e.stopPropagation()}
+                            style={{width:"100%",padding:"5px 8px",borderRadius:6,
+                              border:`1px solid ${customBreakInput[account]?"#39ff14":"rgba(255,255,255,0.15)"}`,
+                              background:"rgba(255,255,255,0.04)",color:"#fff",
+                              fontFamily:"'Fira Code',monospace",fontSize:10,outline:"none"}}/>
+                          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.35)",flexShrink:0}}>min</span>
+                        </div>
                       </div>
                     )}
                     <button onClick={()=>handleBreakToggle(account,onBreak)}
