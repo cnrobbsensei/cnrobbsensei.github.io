@@ -52,34 +52,39 @@ window.fbGames = {
     const val = snap.val() || {};
     return Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score).slice(0,5);
   },
-// One entry PER PLAYER: each player's row is keyed off their (trimmed,
-// lowercased) name instead of a random push() id, so replaying never adds
-// extra rows — it can only raise that player's own best score. Only the
-// single highest score any given person has ever gotten counts toward the
-// leaderboard / top 5.
+// One entry PER PLAYER, always at their correct rank: a Firebase
+// transaction reads + rewrites the whole leaderboard node in one atomic
+// step, so two ninjas saving scores back-to-back can't race each other and
+// clobber/delete one another's entry (the old get-then-set-then-delete
+// version had that exact gap, which is why scores were sometimes vanishing).
 async submitScore(gameId, name, score){
   const cleanName = name.trim();
   const key = window.cnKeySafe(cleanName.toLowerCase());
-  const entryRef = window.cnDb.ref(`games/${gameId}/leaderboard/${key}`);
+  const leaderboardRef = window.cnDb.ref(`games/${gameId}/leaderboard`);
 
-  const existingSnap = await entryRef.once("value");
-  const existing = existingSnap.val();
-  const isNewPersonalBest = !existing || score > existing.score;
+  const txResult = await leaderboardRef.transaction(current => {
+    const val = current || {};
+    const existing = val[key];
+    // A) Already on the board and this run didn't beat their personal best
+    //    — leave the whole node untouched.
+    if(existing && Number(existing.score) >= score) return val;
 
-  if(isNewPersonalBest){
-    await entryRef.set({name: cleanName, score, ts: Date.now()});
-  }
+    // B) New entrant, or a new personal best — upsert this player's single
+    //    row, then keep only the top 5 across everyone. Rewriting the full
+    //    node from scratch here also self-heals any stale/duplicate rows
+    //    left over from earlier bugs, instead of just trimming around them.
+    const next = {...val, [key]: {name: cleanName, score, ts: Date.now()}};
+    const ranked = Object.entries(next)
+      .map(([id,e])=>({id,...e}))
+      .sort((a,b)=>b.score-a.score)
+      .slice(0,5);
+    const trimmed = {};
+    ranked.forEach(e=>{ trimmed[e.id] = {name:e.name, score:e.score, ts:e.ts}; });
+    return trimmed;
+  });
 
-  const snap = await window.cnDb.ref(`games/${gameId}/leaderboard`).once("value");
-  const val = snap.val() || {};
-  const entries = Object.entries(val).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score);
-
-  if(entries.length > 5){
-    const toDelete = entries.slice(5);
-    await Promise.all(toDelete.map(e => window.cnDb.ref(`games/${gameId}/leaderboard/${e.id}`).remove()));
-  }
-
-  const top5 = entries.slice(0, 5);
+  const finalVal = (txResult.committed && txResult.snapshot.val()) || {};
+  const top5 = Object.entries(finalVal).map(([id,e])=>({id,...e})).sort((a,b)=>b.score-a.score);
   const madeIt = top5.some(e => e.id === key);
   return {top5, madeIt};
 }
