@@ -94,11 +94,14 @@ function MobileNav({active,isAdmin,isStudent,studentUsername}){
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{padding:"3px 8px",borderRadius:99,
+          <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+            title={isStudent?"View my profile":undefined}
+            style={{padding:"3px 8px",borderRadius:99,
             background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
             border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
             fontFamily:"'Fira Code',monospace",fontSize:9,
             color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            cursor:isStudent?"pointer":"default",
             maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
             {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
           </div>
@@ -131,7 +134,9 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
         <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
         <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
-        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+        <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+          title={isStudent?"View my profile":undefined}
+          style={{display:"inline-flex",alignItems:"center",gap:5,cursor:isStudent?"pointer":"default",
           background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
           border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
           <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
@@ -269,7 +274,7 @@ function GoalEditor({account,current}){
   );
 }
 
-function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefresh,refreshing,onBreakChanged}){
+function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isAdmin,isGuest,onRefresh,refreshing,onBreakChanged}){
   const today = window.todayStr();
   const todayEntries = allEntries.filter(e=>e.date===today);
   const [togglingAccount,setTogglingAccount]=useState(null);
@@ -295,11 +300,23 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
     map[key].attempts += 1;
     map[key].lastSeen = Math.max(map[key].lastSeen, e.createdAt||0);
   });
+  function isRevokedToday(key){
+    const r = revocations && revocations[key];
+    return !!(r && r.date === today);
+  }
+  // A removed ninja disappears here immediately — checked by both their raw
+  // Points name and (if registered) their linked account, since either form
+  // could have been revoked.
+  function isRemoved(p){
+    if(isRevokedToday(window.cnKeySafe(p.name))) return true;
+    const linked = findLinkedAccount(p.name, usernames);
+    return linked ? isRevokedToday(window.cnKeySafe(linked)) : false;
+  }
   const allToday = Object.values(map);
   const present = allToday
-    .filter(p => p.lastSeen && (nowTick - p.lastSeen <= window.SESSION_MS))
+    .filter(p => p.lastSeen && (nowTick - p.lastSeen <= window.SESSION_MS) && !isRemoved(p))
     .sort((a,b)=>b.lastSeen-a.lastSeen);
-  const expiredCount = allToday.length - present.length;
+  const expiredCount = allToday.filter(p => !isRemoved(p) && !(p.lastSeen && (nowTick - p.lastSeen <= window.SESSION_MS))).length;
 
   // Per-ninja selected break length (minutes), used only when starting a break.
   // Defaults to the last preset picked; a custom number can override it too.
@@ -363,6 +380,37 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
       await onRefresh();
     } catch(e){ console.warn(e); alert("Something went wrong unlocking the session: "+(e&&e.message?e.message:e)); }
     setUnlockingAccount(null);
+  }
+
+  // "Remove from Dojo" — revokes today's Points-based login access outright
+  // (unlike End Session, this needs no later "Unlock": it just clears itself
+  // tomorrow) and force-logs-out any active session right away. Works even
+  // for ninjas with no linked account, since it's keyed by their Points name
+  // as well as their linked account (if any).
+  const [removingKey,setRemovingKey]=useState(null);
+  async function handleRemove(p, account){
+    if(removingKey) return;
+    if(!window.fbAccessRevocation || typeof window.fbAccessRevocation.revoke !== "function"){
+      alert("This site's shared.js is out of date and doesn't have the Remove from Dojo feature yet — please update shared.js (and reload) and try again.");
+      return;
+    }
+    if(!window.confirm(`Remove ${p.name} from the dojo? They'll disappear from this list and can't log back in today — even if their 2-hour window hasn't closed yet.`)) return;
+    const pw = window.prompt(`Enter Sensei password to remove ${p.name}:`);
+    if(pw===null) return;
+    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
+    const nameKey = window.cnKeySafe(p.name);
+    setRemovingKey(nameKey);
+    try{
+      await window.fbAccessRevocation.revoke(nameKey);
+      await window.cnSession.forceLogoutKey(nameKey);
+      if(account){
+        const acctKey = window.cnKeySafe(account);
+        await window.fbAccessRevocation.revoke(acctKey);
+        await window.cnSession.forceLogoutKey(acctKey);
+      }
+      await onRefresh();
+    } catch(e){ console.warn(e); alert("Something went wrong removing them: "+(e&&e.message?e.message:e)); }
+    setRemovingKey(null);
   }
 
   return(
@@ -430,7 +478,10 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
                   <div style={{width:36,height:36,borderRadius:"50%",background:"linear-gradient(135deg,#39ff14,#00cfff)",
                     display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>🥷</div>
                   <div style={{overflow:"hidden"}}>
-                    <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:14,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    <div onClick={()=>{ if(account&&!isGuest) window.location.href=window.cnProfileHref(account); }}
+                      title={account&&!isGuest?"View profile":undefined}
+                      style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:14,color:"#fff",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",
+                      cursor:account&&!isGuest?"pointer":"default",textDecoration:account&&!isGuest?"underline":"none",textDecorationColor:"rgba(57,255,20,0.3)"}}>
                       {p.name}
                     </div>
                     {account?(
@@ -528,6 +579,17 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,isAdmin,onRefre
                         {endingAccount===account?"...":!account?"⛔ No Account Linked":"⛔ End Session"}
                       </button>
                     )}
+                    <button onClick={()=>handleRemove(p,account)}
+                      disabled={removingKey===window.cnKeySafe(p.name)}
+                      title="Removes them from this list and blocks login for the rest of today"
+                      style={{width:"100%",padding:"8px",borderRadius:8,marginTop:6,
+                        border:"1px solid rgba(255,45,120,0.5)",
+                        cursor:removingKey===window.cnKeySafe(p.name)?"not-allowed":"pointer",
+                        background:"rgba(255,45,120,0.18)",
+                        color:"#ff2d78",
+                        fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:10,letterSpacing:.5}}>
+                      {removingKey===window.cnKeySafe(p.name)?"...":"🚫 Remove from Dojo"}
+                    </button>
                   </>
                 )}
               </Glass>
@@ -546,6 +608,7 @@ function NITDApp(){
   const [breakStatuses,setBreakStatuses]=useState({});
   const [goals,setGoals]=useState({});
   const [locks,setLocks]=useState({});
+  const [revocations,setRevocations]=useState({});
   const [loading,setLoading]=useState(true);
   const [refreshing,setRefreshing]=useState(false);
   const isMobile=useIsMobile();
@@ -597,6 +660,15 @@ function NITDApp(){
     return unsub;
   },[auth]);
 
+  // Access revocations are kept live too, so a removed ninja disappears
+  // from the present list instantly (here and on any other open tab).
+  useEffect(()=>{
+    if(!auth) return;
+    if(!window.fbAccessRevocation || typeof window.fbAccessRevocation.listen !== "function") return;
+    const unsub = window.fbAccessRevocation.listen(setRevocations);
+    return unsub;
+  },[auth]);
+
   if(!auth||loading) return <LoadingScreen status="Checking the dojo..."/>;
   const isAdmin=auth.role==="admin", isStudent=auth.role==="student";
 
@@ -610,8 +682,8 @@ function NITDApp(){
           :<Sidebar active="nitd" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
         }
         <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
-          <NITDTab allEntries={allEntries} usernames={usernames} breakStatuses={breakStatuses} goals={goals} locks={locks}
-            isAdmin={isAdmin} onRefresh={()=>load(true)} refreshing={refreshing} onBreakChanged={reloadBreakStatuses}/>
+          <NITDTab allEntries={allEntries} usernames={usernames} breakStatuses={breakStatuses} goals={goals} locks={locks} revocations={revocations}
+            isAdmin={isAdmin} isGuest={auth.role==="guest"} onRefresh={()=>load(true)} refreshing={refreshing} onBreakChanged={reloadBreakStatuses}/>
         </div>
       </div>
       <TourOverlay/>

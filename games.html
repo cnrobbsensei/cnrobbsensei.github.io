@@ -146,11 +146,14 @@ function MobileNav({active,isAdmin,isStudent,studentUsername}){
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{padding:"3px 8px",borderRadius:99,
+          <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+            title={isStudent?"View my profile":undefined}
+            style={{padding:"3px 8px",borderRadius:99,
             background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
             border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
             fontFamily:"'Fira Code',monospace",fontSize:9,
             color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            cursor:isStudent?"pointer":"default",
             maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
             {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
           </div>
@@ -183,7 +186,9 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
         <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
         <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
-        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+        <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+          title={isStudent?"View my profile":undefined}
+          style={{display:"inline-flex",alignItems:"center",gap:5,cursor:isStudent?"pointer":"default",
           background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
           border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
           <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
@@ -2092,7 +2097,7 @@ function LaneRushGame({defaultName,onExit}){
   );
 }
 
-function LeaderboardOnly({gameId,title,onPlay,canPlay=true}){
+function LeaderboardOnly({gameId,title,onPlay,canPlay=true,isGuest}){
   const [leaderboard,setLeaderboard]=useState(null);
   useEffect(()=>{
     window.fbGames.getLeaderboard(gameId).then(setLeaderboard).catch(()=>setLeaderboard([]));
@@ -2111,7 +2116,9 @@ function LeaderboardOnly({gameId,title,onPlay,canPlay=true}){
             return(
               <div key={e.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                 padding:"10px 14px",borderRadius:9,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)"}}>
-                <span style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,fontWeight:700}}>{medal} {e.name}</span>
+                <span onClick={()=>{ if(!isGuest) window.location.href=window.cnProfileHref(e.name); }}
+                  style={{fontFamily:"'Exo 2',sans-serif",fontSize:13,fontWeight:700,
+                  cursor:isGuest?"default":"pointer",textDecoration:isGuest?"none":"underline",textDecorationColor:"rgba(57,255,20,0.3)"}}>{medal} {e.name}</span>
                 <span style={{fontFamily:"'Orbitron',sans-serif",fontSize:13,fontWeight:700,color:"#39ff14"}}>{e.score}</span>
               </div>
             );
@@ -2222,7 +2229,7 @@ const GAME_META = {
   ]},
 };
 
-function GameModal({gameId,initialMode,defaultName,onClose,isAdmin}){
+function GameModal({gameId,initialMode,defaultName,onClose,isAdmin,isGuest}){
   // Admins can browse leaderboards/instructions, but can never actually
   // play — if an admin somehow lands on "play" (e.g. stale initialMode),
   // bump them to the leaderboard instead.
@@ -2249,7 +2256,7 @@ function GameModal({gameId,initialMode,defaultName,onClose,isAdmin}){
         </div>
         <div style={{flex:1,overflowY:"auto",display:"flex",flexDirection:"column"}}>
           {mode==="leaderboard"
-            ?<LeaderboardOnly gameId={meta.leaderboardId} title={meta.title} onPlay={goPlay} canPlay={!isAdmin}/>
+            ?<LeaderboardOnly gameId={meta.leaderboardId} title={meta.title} onPlay={goPlay} canPlay={!isAdmin} isGuest={isGuest}/>
             :mode==="instructions"
               ?<InstructionsView icon={meta.icon} title={meta.title} steps={meta.steps||[]} onPlay={goPlay} canPlay={!isAdmin}/>
               :isAdmin
@@ -2300,7 +2307,7 @@ const GAMES_LIST = [
   {id:"lanerush",name:"Lane Rush 3D",icon:"🛣️",desc:"Dodge down a 3D perspective road — how far can you go?",active:true},
 ];
 
-function GamesTab({isAdmin,studentUsername}){
+function GamesTab({isAdmin,isGuest,studentUsername}){
   const [modal,setModal]=useState(null); // {gameId, mode}
   const [breakData,setBreakData]=useState(null);
   const [nowTick,setNowTick]=useState(Date.now());
@@ -2399,7 +2406,7 @@ function GamesTab({isAdmin,studentUsername}){
       )}
 
       {modal&&(
-        <GameModal gameId={modal.gameId} initialMode={modal.mode} defaultName={studentUsername||""} onClose={()=>setModal(null)} isAdmin={isAdmin}/>
+        <GameModal gameId={modal.gameId} initialMode={modal.mode} defaultName={studentUsername||""} onClose={()=>setModal(null)} isAdmin={isAdmin} isGuest={isGuest}/>
       )}
     </div>
   );
@@ -2422,7 +2429,7 @@ function GamesApp(){
           :<Sidebar active="games" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
         }
         <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
-          <GamesTab isAdmin={isAdmin} studentUsername={auth.username}/>
+          <GamesTab isAdmin={isAdmin} isGuest={auth.role==="guest"} studentUsername={auth.username}/>
         </div>
       </div>
       <TourOverlay/>

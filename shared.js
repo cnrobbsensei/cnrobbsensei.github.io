@@ -116,6 +116,69 @@
   };
 
   // -------------------------------------------------------------------------
+  // Ninja Profiles — per-account avatar (from a fixed emoji set, never free
+  // text, so nothing arbitrary ever gets stored/rendered) plus a link to
+  // profile.html. Achievements themselves are computed on the fly from
+  // existing data (Points/NOTM/Riddle/Games) rather than stored here.
+  // -------------------------------------------------------------------------
+  window.CN_AVATARS = ["🥷","🐉","🦊","🐯","🦁","🐺","🦅","🐢","🦈","🐧","🤖","👾","🎮","⚡","🔥","🌟","💎","🚀","🎯","🛡️"];
+
+  // Mirrors games.html's GAMES_LIST/GAME_META (id -> leaderboard id), kept
+  // here too so profile.html can compute game achievements without needing
+  // to load/duplicate all of games.html's game logic.
+  window.CN_GAMES_LIST = [
+    {id:"memory",name:"Memory Match",icon:"🧠",leaderboardId:"memoryMatch"},
+    {id:"dino",name:"Dino Runner",icon:"🦖",leaderboardId:"dino"},
+    {id:"snake",name:"Snake",icon:"🐍",leaderboardId:"snake"},
+    {id:"minesweeper",name:"Minesweeper",icon:"💣",leaderboardId:"minesweeper"},
+    {id:"flappy",name:"Flappy Ninja",icon:"🥷",leaderboardId:"flappy"},
+    {id:"game2048",name:"2048",icon:"🔢",leaderboardId:"game2048"},
+    {id:"whack",name:"Whack-a-Ninja",icon:"🥷",leaderboardId:"whack"},
+    {id:"breakout",name:"Brick Breaker",icon:"🧱",leaderboardId:"breakout"},
+    {id:"lanerush",name:"Lane Rush 3D",icon:"🛣️",leaderboardId:"lanerush"},
+  ];
+
+  window.fbProfiles = {
+    async getAll(){
+      const snap = await db.ref("profiles").once("value");
+      return snap.val() || {};
+    },
+    async get(accountKey){
+      if(!accountKey) return null;
+      const snap = await db.ref(`profiles/${accountKey}`).once("value");
+      return snap.val() || null;
+    },
+    async setAvatar(accountKey, avatar){
+      if(!accountKey) return;
+      // Only ever accept one of the fixed emoji options — never arbitrary text.
+      const clean = window.CN_AVATARS.includes(avatar) ? avatar : window.CN_AVATARS[0];
+      await db.ref(`profiles/${accountKey}`).update({avatar: clean, updatedAt: Date.now()});
+    },
+    listen(callback){
+      const ref = db.ref("profiles");
+      const handler = snap => callback(snap.val() || {});
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
+    }
+  };
+
+  // Guests must never reach a profile (their own or anyone else's).
+  window.cnCanViewProfiles = function(role){ return role === "student" || role === "admin"; };
+
+  // Builds the href for a given ninja's profile page. `nameOrKey` can be a
+  // first name (from a Points entry) or a full registered username.
+  window.cnProfileHref = function(nameOrKey){
+    return "profile.html?u=" + encodeURIComponent(String(nameOrKey||"").trim());
+  };
+
+  // Navigates to a ninja's profile — no-op for guests/empty names so it's
+  // always safe to wire straight into an onClick without extra role checks.
+  window.cnGoToProfile = function(nameOrKey, role){
+    if(!nameOrKey || !window.cnCanViewProfiles(role)) return;
+    window.location.href = window.cnProfileHref(nameOrKey);
+  };
+
+  // -------------------------------------------------------------------------
   // Sample / demo data — shown to Guests instead of real student data.
   // Guests must never see actual ninja names, points, chat, or session info.
   // -------------------------------------------------------------------------
@@ -241,6 +304,42 @@
     // the instant a lock is set/cleared, from any window.
     listen(callback){
       const ref = db.ref("sessionLocks");
+      const handler = snap => callback(snap.val() || {});
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Points-access revocations — set from "In The Dojo" when a Sensei hits
+  // "Remove from Dojo". Unlike a full session lock (which requires a manual
+  // "Unlock Session" later), this only revokes access for TODAY: the ninja
+  // immediately disappears from the present list, can't log back in for the
+  // rest of the day even if their 2-hour window hasn't expired, and any
+  // active session is force-logged-out right away. It clears itself
+  // naturally tomorrow since it's checked against today's date.
+  // -------------------------------------------------------------------------
+  window.fbAccessRevocation = {
+    async getAll(){
+      const snap = await db.ref("pointsAccessRevoked").once("value");
+      return snap.val() || {};
+    },
+    async revoke(nameKey){
+      if(!nameKey) return;
+      await db.ref(`pointsAccessRevoked/${nameKey}`).set({date: window.todayStr(), revokedAt: Date.now()});
+    },
+    async isRevokedToday(nameKey){
+      if(!nameKey) return false;
+      try{
+        const snap = await db.ref(`pointsAccessRevoked/${nameKey}`).once("value");
+        const v = snap.val();
+        return !!(v && v.date === window.todayStr());
+      }catch(e){ return false; }
+    },
+    // Realtime listener so "In The Dojo" drops a removed ninja from the
+    // present list instantly, from any window.
+    listen(callback){
+      const ref = db.ref("pointsAccessRevoked");
       const handler = snap => callback(snap.val() || {});
       ref.on("value", handler);
       return () => ref.off("value", handler);
@@ -444,6 +543,11 @@
       const sessionHours = Number(mostRecentEntry.sessionHours) === 1 ? 1 : window.SESSION_HOURS;
       const sessionMs = sessionHours*60*60*1000;
       if(Date.now() - mostRecent > sessionMs) return {ok:false, reason:"expired"};
+      // A Sensei can remove a ninja from "In The Dojo" to revoke today's
+      // access immediately, even if the 2-hour window hasn't expired yet.
+      const revokedFull = await window.fbAccessRevocation.isRevokedToday(window.cnKeySafe(fullTyped));
+      const revokedFirst = await window.fbAccessRevocation.isRevokedToday(window.cnKeySafe(firstName));
+      if(revokedFull || revokedFirst) return {ok:false, reason:"removed"};
       // Keep the full login name (e.g. "nathan.blah") as the matched identity,
       // not just the first name, so accountKey/session/display stay correct.
       return {ok:true, matchedName: trimmed, enteredAt: mostRecent, sessionHours, expiresAt: mostRecent + sessionMs};
@@ -553,7 +657,7 @@
       if(!accountKey) return;
       try{ await db.ref(`activeSessions/${accountKey}`).remove(); }catch(e){}
       try{ await db.ref(`sessionLocks/${accountKey}`).set({lockedAt: Date.now()}); }catch(e){}
-      try{ await db.ref(`forcedLogouts/${accountKey}`).set(Date.now()); }catch(e){}
+      try{ await db.ref(`forcedLogouts/${accountKey}`).set("session_ended"); }catch(e){}
     },
 
     // Reverses endSession's lock, letting the ninja log back in (assuming
@@ -561,6 +665,16 @@
     async unlockSession(accountKey){
       if(!accountKey) return;
       try{ await db.ref(`sessionLocks/${accountKey}`).remove(); }catch(e){}
+    },
+
+    // Immediately force-logs-out whichever session (if any) is active under
+    // this key, without locking the account long-term — used by "Remove from
+    // Dojo" alongside fbAccessRevocation, which handles blocking today's
+    // logins on its own.
+    async forceLogoutKey(accountKey){
+      if(!accountKey) return;
+      try{ await db.ref(`activeSessions/${accountKey}`).remove(); }catch(e){}
+      try{ await db.ref(`forcedLogouts/${accountKey}`).set("removed"); }catch(e){}
     }
   };
 
@@ -591,6 +705,10 @@
             const locked = await window.fbSessionLock.isLocked(s.accountKey);
             if(locked){ window.cnSession.logout("session_ended"); return; }
           }catch(e){}
+          try{
+            const removed = await window.fbAccessRevocation.isRevokedToday(s.accountKey);
+            if(removed){ window.cnSession.logout("removed"); return; }
+          }catch(e){}
         }
       }, 20000);
       return ()=>clearInterval(iv);
@@ -606,8 +724,10 @@
       const ref = db.ref(`forcedLogouts/${s.accountKey}`);
       const handler = snap => {
         if(!snap.exists()) return;
+        const val = snap.val();
+        const reason = (typeof val === "string") ? val : "session_ended";
         try{ ref.remove(); }catch(e){}
-        window.cnSession.logout("session_ended");
+        window.cnSession.logout(reason);
       };
       ref.on("value", handler);
       return () => ref.off("value", handler);

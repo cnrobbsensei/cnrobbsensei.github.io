@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Code Ninjas – Ninja Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#060609;color:#fff;}
+#root{min-height:100vh;display:flex;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+input::placeholder{color:rgba(255,255,255,0.2);}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@keyframes popIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+@media(max-width:768px){#root{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="shared.js"></script>
+<script type="text/babel">
+const {useState,useEffect,useMemo} = React;
+
+function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
+  return(
+    <div onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
+      background:"rgba(255,255,255,0.06)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
+      border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",...style
+    }}>{children}</div>
+  );
+}
+function Spinner(){
+  return <div style={{width:16,height:16,border:"2px solid rgba(255,255,255,0.2)",borderTop:"2px solid #39ff14",borderRadius:"50%",animation:"spin .8s linear infinite",display:"inline-block"}}/>;
+}
+function LoadingScreen({status}){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:36,height:36,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
+    </div>
+  );
+}
+function Toast({msg,color="#39ff14",onDone}){
+  useEffect(()=>{const t=setTimeout(onDone,3000);return()=>clearTimeout(t);},[]);
+  return(
+    <div style={{position:"fixed",bottom:24,right:16,left:16,zIndex:9999,maxWidth:380,margin:"0 auto",
+      background:"rgba(10,10,20,0.96)",border:`1px solid ${color}`,borderRadius:12,
+      padding:"14px 20px",color,fontFamily:"'Fira Code',monospace",fontWeight:600,fontSize:13,
+      boxShadow:`0 0 24px ${color}55`,animation:"slideIn .3s ease"}}>{msg}</div>
+  );
+}
+
+// Matches a stored Points/NOTM/Riddle "name" field against the ninja we're
+// viewing, the same loose way shared.js's session login does (first-name OR
+// full registered username), so profiles line up correctly whichever form
+// was saved.
+function matchesName(stored, viewingName){
+  const s = String(stored||"").trim().toLowerCase();
+  const full = String(viewingName||"").trim().toLowerCase();
+  if(!s || !full) return false;
+  const first = full.split(".")[0];
+  return s === full || s === first;
+}
+
+function BackBar(){
+  return(
+    <div style={{padding:"18px 20px 0"}}>
+      <button onClick={()=>{ if(window.history.length>1) window.history.back(); else window.location.href="home.html"; }}
+        style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:99,
+        color:"rgba(255,255,255,0.7)",padding:"8px 16px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:11,letterSpacing:1}}>
+        ← BACK
+      </button>
+    </div>
+  );
+}
+
+function AvatarPicker({current,onPick,onClose}){
+  return(
+    <div style={{position:"fixed",inset:0,zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",
+      background:"rgba(0,0,0,0.65)",padding:16}} onClick={onClose}>
+      <Glass style={{padding:24,maxWidth:380,width:"100%",animation:"popIn .2s ease"}} onClick={e=>e.stopPropagation()}>
+        <h3 style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,color:"#fff",marginBottom:14,textAlign:"center"}}>Choose Your Avatar</h3>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:16}}>
+          {window.CN_AVATARS.map(a=>(
+            <button key={a} onClick={()=>onPick(a)} style={{
+              fontSize:24,padding:"10px 0",borderRadius:12,cursor:"pointer",
+              border:a===current?"2px solid #39ff14":"1px solid rgba(255,255,255,0.12)",
+              background:a===current?"rgba(57,255,20,0.15)":"rgba(255,255,255,0.04)"}}>
+              {a}
+            </button>
+          ))}
+        </div>
+        <button onClick={onClose} style={{width:"100%",padding:"10px",borderRadius:10,border:"1px solid rgba(255,255,255,0.15)",
+          background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",cursor:"pointer",fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12}}>
+          Close
+        </button>
+      </Glass>
+    </div>
+  );
+}
+
+function StatCard({icon,label,val,color}){
+  return(
+    <Glass style={{padding:"16px 14px",borderColor:`${color}33`,boxShadow:`0 8px 24px rgba(0,0,0,0.35),0 0 16px ${color}1a`}}>
+      <div style={{fontSize:22,marginBottom:6}}>{icon}</div>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.4)",marginBottom:4,letterSpacing:1}}>{label.toUpperCase()}</div>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:16,color,wordBreak:"break-word"}}>{val}</div>
+    </Glass>
+  );
+}
+
+function AchievementBadge({icon,title,desc,earned}){
+  return(
+    <Glass style={{padding:"14px 16px",display:"flex",gap:12,alignItems:"center",
+      opacity:earned?1:0.35,borderColor:earned?"rgba(255,215,0,0.35)":"rgba(255,255,255,0.08)"}}>
+      <div style={{fontSize:26,flexShrink:0}}>{icon}</div>
+      <div style={{overflow:"hidden"}}>
+        <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:13,color:earned?"#ffd700":"rgba(255,255,255,0.5)"}}>{title}</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.4)",marginTop:2}}>{desc}</div>
+      </div>
+    </Glass>
+  );
+}
+
+function NinjaPicker({usernames,onPick}){
+  const [q,setQ]=useState("");
+  const filtered = usernames.filter(u=>u.toLowerCase().includes(q.trim().toLowerCase())).slice(0,40);
+  return(
+    <div style={{maxWidth:520,margin:"40px auto",padding:"0 20px"}}>
+      <Glass style={{padding:24}}>
+        <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:16,color:"#fff",marginBottom:14}}>🥷 View a Ninja Profile</h2>
+        <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search registered ninjas..."
+          style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,
+          padding:"11px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:13,outline:"none",marginBottom:14}}/>
+        <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:340,overflowY:"auto"}}>
+          {filtered.length===0&&<p style={{color:"rgba(255,255,255,0.35)",fontFamily:"'Fira Code',monospace",fontSize:11}}>No matching ninjas.</p>}
+          {filtered.map(u=>(
+            <button key={u} onClick={()=>onPick(u)} style={{textAlign:"left",padding:"10px 14px",borderRadius:10,
+              border:"1px solid rgba(255,255,255,0.1)",background:"rgba(255,255,255,0.03)",color:"#fff",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontSize:13}}>
+              🥷 {u}
+            </button>
+          ))}
+        </div>
+      </Glass>
+    </div>
+  );
+}
+
+function ProfileView({viewingName,canEdit,setToast}){
+  const [loading,setLoading]=useState(true);
+  const [avatar,setAvatar]=useState(window.CN_AVATARS[0]);
+  const [pickerOpen,setPickerOpen]=useState(false);
+  const [stats,setStats]=useState(null);
+  const accountKey = useMemo(()=>window.cnKeySafe(viewingName),[viewingName]);
+
+  useEffect(()=>{
+    let cancelled=false;
+    (async()=>{
+      setLoading(true);
+      try{
+        const [profile,allEntries,notmEntries,riddleMap,usernames] = await Promise.all([
+          window.fbProfiles.get(accountKey),
+          window.fbLeaderboard.getAll(),
+          window.cnDb.ref("notm").once("value").then(s=>{
+            const val=s.val()||{}; return Object.entries(val).map(([id,e])=>({id,...e}));
+          }),
+          window.cnDb.ref("riddles").once("value").then(s=>s.val()||{}),
+          window.fbUsernames.getAll(),
+        ]);
+        if(cancelled) return;
+
+        // ---- Points: totals, current-week standing, weekly #1 finishes ----
+        const mine = allEntries.filter(e=>matchesName(e.name,viewingName));
+        const totalPoints = mine.reduce((sum,e)=>sum+(Number(e.points)||0),0);
+        const cw = window.getCurrentWeek();
+        const weekPoints = mine.filter(e=>e.week===cw).reduce((sum,e)=>sum+(Number(e.points)||0),0);
+
+        const byWeek = {};
+        allEntries.forEach(e=>{
+          if(!e.name) return;
+          const key = String(e.name).trim().toLowerCase().split(".")[0];
+          const bucket = byWeek[e.week] || (byWeek[e.week]={});
+          bucket[key] = (bucket[key]||0) + (Number(e.points)||0);
+        });
+        const myFirst = String(viewingName).trim().toLowerCase().split(".")[0];
+        let weeklyWins = 0;
+        Object.values(byWeek).forEach(bucket=>{
+          const top = Object.entries(bucket).sort((a,b)=>b[1]-a[1])[0];
+          if(top && top[0]===myFirst && top[1]>0) weeklyWins++;
+        });
+
+        // ---- Ninja of the Month wins ----
+        const byMonth = {};
+        notmEntries.forEach(e=>{
+          if(!e.name) return;
+          const key = String(e.name).trim().toLowerCase();
+          const bucket = byMonth[e.monthKey] || (byMonth[e.monthKey]={});
+          bucket[key] = Math.max(bucket[key]||0, Number(e.points)||0);
+        });
+        let notmWins = 0;
+        Object.values(byMonth).forEach(bucket=>{
+          const top = Object.entries(bucket).sort((a,b)=>b[1]-a[1])[0];
+          if(top && matchesName(top[0],viewingName) && top[1]>0) notmWins++;
+        });
+
+        // ---- Riddle wins ----
+        let riddleWins = 0;
+        Object.values(riddleMap).forEach(w=>{ if(w && w.winner && matchesName(w.winner,viewingName)) riddleWins++; });
+
+        // ---- Games: best rank across each game's top-5 board ----
+        const gameResults = await Promise.all(window.CN_GAMES_LIST.map(async g=>{
+          try{
+            const snap = await window.cnDb.ref(`games/${g.leaderboardId}/leaderboard`).once("value");
+            const val = snap.val() || {};
+            const entry = val[accountKey];
+            if(!entry) return null;
+            const ranked = Object.entries(val).sort((a,b)=>b[1].score-a[1].score).map(([id])=>id);
+            const rank = ranked.indexOf(accountKey)+1;
+            return {...g, score:entry.score, rank};
+          }catch(e){ return null; }
+        }));
+
+        if(cancelled) return;
+        setAvatar((profile && profile.avatar) || window.CN_AVATARS[0]);
+        setStats({
+          totalPoints, weekPoints, weeklyWins, notmWins, riddleWins,
+          gameResults: gameResults.filter(Boolean),
+          entriesLogged: mine.length,
+          registered: usernames.some(u=>u.toLowerCase()===String(viewingName).toLowerCase()),
+        });
+      }catch(e){
+        console.warn(e);
+        if(!cancelled) setStats({totalPoints:0,weekPoints:0,weeklyWins:0,notmWins:0,riddleWins:0,gameResults:[],entriesLogged:0,registered:false});
+      }
+      if(!cancelled) setLoading(false);
+    })();
+    return ()=>{ cancelled=true; };
+  },[accountKey]);
+
+  async function pickAvatar(a){
+    setAvatar(a);
+    setPickerOpen(false);
+    try{
+      await window.fbProfiles.setAvatar(accountKey,a);
+      setToast({msg:"Avatar saved! 🥷",color:"#39ff14"});
+    }catch(e){
+      setToast({msg:"Couldn't save avatar — try again.",color:"#ff2d78"});
+    }
+  }
+
+  if(loading || !stats) return <LoadingScreen status="Loading profile..."/>;
+
+  const displayName = window.cnNormalizeName ? window.cnNormalizeName(viewingName) : viewingName;
+
+  return(
+    <div style={{maxWidth:820,margin:"0 auto",padding:"24px 20px 60px",width:"100%"}}>
+      <Glass style={{padding:"28px 24px",marginBottom:20,textAlign:"center",position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse 60% 60% at 50% 0%,rgba(57,255,20,0.08) 0%,transparent 70%)"}}/>
+        <div style={{position:"relative"}}>
+          <div style={{position:"relative",display:"inline-block"}}>
+            <div style={{width:88,height:88,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
+              fontSize:44,background:"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.14))",
+              border:"2px solid rgba(57,255,20,0.35)",margin:"0 auto"}}>
+              {avatar}
+            </div>
+            {canEdit&&(
+              <button onClick={()=>setPickerOpen(true)} title="Change avatar" style={{
+                position:"absolute",right:-4,bottom:-2,width:28,height:28,borderRadius:"50%",border:"2px solid #060609",
+                background:"#39ff14",color:"#000",cursor:"pointer",fontSize:12,fontWeight:700}}>✎</button>
+            )}
+          </div>
+          <h1 style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:22,marginTop:14,color:"#fff"}}>{displayName}</h1>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",letterSpacing:1,marginTop:4}}>
+            {stats.registered ? "🔗 REGISTERED NINJA" : "🥷 NINJA PROFILE"}
+          </div>
+        </div>
+      </Glass>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:24}}>
+        <StatCard icon="🏆" label="Lifetime Points" val={stats.totalPoints.toLocaleString()} color="#39ff14"/>
+        <StatCard icon="📅" label="This Week" val={stats.weekPoints.toLocaleString()+" pts"} color="#00cfff"/>
+        <StatCard icon="🥇" label="Weekly Wins" val={String(stats.weeklyWins)} color="#ffd700"/>
+        <StatCard icon="⭐" label="NOTM Wins" val={String(stats.notmWins)} color="#ff2d78"/>
+      </div>
+
+      <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,color:"#fff",marginBottom:12,letterSpacing:1}}>🎖️ Achievements</h2>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(230px,1fr))",gap:10,marginBottom:24}}>
+        <AchievementBadge icon="🥇" title="Weekly Champion" desc={stats.weeklyWins>0?`Won ${stats.weeklyWins} week${stats.weeklyWins!==1?"s":""}!`:"Top the Points board for a week"} earned={stats.weeklyWins>0}/>
+        <AchievementBadge icon="⭐" title="Ninja of the Month" desc={stats.notmWins>0?`${stats.notmWins} month${stats.notmWins!==1?"s":""} won!`:"Top the monthly NOTM board"} earned={stats.notmWins>0}/>
+        <AchievementBadge icon="🧩" title="Riddle Master" desc={stats.riddleWins>0?`Solved ${stats.riddleWins} weekly riddle${stats.riddleWins!==1?"s":""}!`:"Win a weekly riddle"} earned={stats.riddleWins>0}/>
+        <AchievementBadge icon="🔥" title="Century Club" desc={stats.totalPoints>=100?"Earned 100+ lifetime points!":"Earn 100+ lifetime points"} earned={stats.totalPoints>=100}/>
+        <AchievementBadge icon="💯" title="Point Legend" desc={stats.totalPoints>=500?"Earned 500+ lifetime points!":"Earn 500+ lifetime points"} earned={stats.totalPoints>=500}/>
+        <AchievementBadge icon="🎮" title="Game Champion" desc={stats.gameResults.some(g=>g.rank===1)?"Ranked #1 on a game leaderboard!":"Reach #1 on any game leaderboard"} earned={stats.gameResults.some(g=>g.rank===1)}/>
+      </div>
+
+      {stats.gameResults.length>0&&(
+        <>
+          <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,color:"#fff",marginBottom:12,letterSpacing:1}}>🎮 Game Leaderboards</h2>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10}}>
+            {stats.gameResults.map(g=>(
+              <Glass key={g.id} style={{padding:"12px 14px",display:"flex",alignItems:"center",gap:10}}>
+                <div style={{fontSize:20}}>{g.icon}</div>
+                <div>
+                  <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:12,color:"#fff"}}>{g.name}</div>
+                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:g.rank===1?"#ffd700":"rgba(255,255,255,0.4)"}}>#{g.rank} · {g.score.toLocaleString()} pts</div>
+                </div>
+              </Glass>
+            ))}
+          </div>
+        </>
+      )}
+
+      {pickerOpen&&<AvatarPicker current={avatar} onPick={pickAvatar} onClose={()=>setPickerOpen(false)}/>}
+    </div>
+  );
+}
+
+function ProfileApp(){
+  const {auth,ready} = window.useCnAuth();
+  const [toast,setToast] = useState(null);
+  const [usernames,setUsernames] = useState([]);
+  const [usernamesLoaded,setUsernamesLoaded] = useState(false);
+
+  useEffect(()=>{
+    if(!ready) return;
+    if(!window.cnCanViewProfiles(auth.role)){
+      // Guests never see any profile — themselves or anyone else's.
+      window.location.href = "home.html";
+      return;
+    }
+    window.fbUsernames.getAll().then(list=>{ setUsernames(list); setUsernamesLoaded(true); }).catch(()=>setUsernamesLoaded(true));
+  },[ready]);
+
+  if(!ready || !auth || !window.cnCanViewProfiles(auth.role) || !usernamesLoaded){
+    return <LoadingScreen status="Loading profile..."/>;
+  }
+
+  const isAdmin = auth.role==="admin", isStudent = auth.role==="student";
+  const params = new URLSearchParams(window.location.search);
+  const requested = (params.get("u")||"").trim();
+  const viewingName = requested || (isStudent ? auth.username : "");
+  const isOwnProfile = isStudent && auth.username && viewingName.toLowerCase()===auth.username.toLowerCase();
+  const canEdit = isOwnProfile || isAdmin;
+
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
+      <div style={{position:"relative",zIndex:1,width:"100%",minHeight:"100vh"}}>
+        <BackBar/>
+        {!viewingName
+          ? <NinjaPicker usernames={usernames} onPick={u=>{ window.location.href = window.cnProfileHref(u); }}/>
+          : <ProfileView key={viewingName} viewingName={viewingName} canEdit={canEdit} setToast={setToast}/>
+        }
+      </div>
+      {toast&&<Toast msg={toast.msg} color={toast.color||"#39ff14"} onDone={()=>setToast(null)}/>}
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ProfileApp/>);
+</script>
+</body>
+</html>

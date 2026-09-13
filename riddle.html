@@ -127,11 +127,14 @@ function MobileNav({active,isAdmin,isStudent,studentUsername}){
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{padding:"3px 8px",borderRadius:99,
+          <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+            title={isStudent?"View my profile":undefined}
+            style={{padding:"3px 8px",borderRadius:99,
             background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
             border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
             fontFamily:"'Fira Code',monospace",fontSize:9,
             color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            cursor:isStudent?"pointer":"default",
             maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
             {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
           </div>
@@ -164,7 +167,9 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
         <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
         <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
         <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
-        <div style={{display:"inline-flex",alignItems:"center",gap:5,
+        <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+          title={isStudent?"View my profile":undefined}
+          style={{display:"inline-flex",alignItems:"center",gap:5,cursor:isStudent?"pointer":"default",
           background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
           border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
           <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
@@ -202,7 +207,7 @@ function Sidebar({active,isAdmin,isStudent,studentUsername}){
   );
 }
 
-function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRiddleMap}){
+function RiddleTab({setToast,isAdmin,isStudent,isGuest,studentUsername,riddleMap,setRiddleMap}){
   const cw = window.getCurrentWeek();
   const totalWeeks = window.getCurrentWeek()+1;
   const [week,setWeek] = useState(cw);
@@ -347,7 +352,10 @@ function RiddleTab({setToast,isAdmin,isStudent,studentUsername,riddleMap,setRidd
             <span style={{fontSize:32}}>{weekData.winner?"👑":"🤷"}</span>
             <div>
               <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:14,fontWeight:700,color:"#ffd700",marginBottom:3}}>Week {week} {weekData.winner?"Winner":"Result"}</div>
-              <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:18,fontWeight:700,color:"#fff"}}>{weekData.winner||"No one got it correct"}</div>
+              <div onClick={()=>{ if(weekData.winner&&!isGuest) window.location.href=window.cnProfileHref(weekData.winner); }}
+                style={{fontFamily:"'Exo 2',sans-serif",fontSize:18,fontWeight:700,color:"#fff",display:"inline-block",
+                cursor:weekData.winner&&!isGuest?"pointer":"default",
+                textDecoration:weekData.winner&&!isGuest?"underline":"none",textDecorationColor:"rgba(255,215,0,0.4)"}}>{weekData.winner||"No one got it correct"}</div>
               <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,215,0,0.5)",marginTop:2}}>🔒 Result locked — cannot be changed</div>
             </div>
           </div>
@@ -599,7 +607,7 @@ function RiddleApp(){
           :<Sidebar active="riddle" isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username}/>
         }
         <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
-          <RiddleTab setToast={setToast} isAdmin={isAdmin} isStudent={isStudent} studentUsername={auth.username} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>
+          <RiddleTab setToast={setToast} isAdmin={isAdmin} isStudent={isStudent} isGuest={!isAdmin&&!isStudent} studentUsername={auth.username} riddleMap={riddleMap} setRiddleMap={setRiddleMap}/>
         </div>
       </div>
       {toast&&<Toast msg={toast.msg} color={toast.color||"#39ff14"} onDone={()=>setToast(null)}/>}
