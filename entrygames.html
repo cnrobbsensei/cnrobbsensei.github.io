@@ -83,12 +83,21 @@ function calcNinjaSummary(groupedForWeek){
   for(const e of groupedForWeek){
     if(!e || !e.name) continue;
     const nameKey = e.name.trim().toLowerCase();
-    if(!map[nameKey]) map[nameKey]={name:e.name,total:0,days:[]};
+    if(!map[nameKey]) map[nameKey]={name:e.name,total:0,best:0,bestDate:null,days:[]};
     map[nameKey].name = e.name; // keep most-recent casing for display
     map[nameKey].total += e.points;
+    // Each grouped entry is one ninja's whole day (all of that day's attempts
+    // summed). A ninja's WEEK score is their single strongest day — days are
+    // never added together, so playing more days can't inflate a rank.
+    if(e.points > map[nameKey].best){
+      map[nameKey].best = e.points;
+      map[nameKey].bestDate = e.date;
+    }
     map[nameKey].days.push({date:e.date,points:e.points,attempts:e.attempts,ids:e.ids});
   }
-  return Object.values(map).sort((a,b)=>b.total-a.total);
+  // Tie-break on weekly total, then name, so the order stays stable.
+  return Object.values(map).sort((a,b)=>
+    b.best-a.best || b.total-a.total || a.name.localeCompare(b.name));
 }
 
 function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
@@ -278,14 +287,14 @@ function LeaderboardView({allEntries,isGuest}){
   const [week,setWeek]=useState(window.getCurrentWeek());
   const weekEntries=allEntries.filter(e=>e.week===week);
   const grouped=groupEntries(weekEntries);
-  // Ranked by each ninja's TOTAL points for the whole week (not per-day
-  // entries), so rank #1 is the week's winner regardless of how many days
-  // or attempts it took them to get there.
+  // Ranked by each ninja's single BEST DAY this week. Days are never added
+  // together — if a ninja scores 20 / 30 / 70 across three days, the board
+  // shows 70, not 120.
   const ninjaBoard=calcNinjaSummary(grouped);
 
   return(
     <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:28,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:10,flexWrap:"wrap"}}>
         <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,20px)",color:"#fff",margin:0}}>🏆 Points Leaderboard</h2>
         <select value={week} onChange={e=>setWeek(Number(e.target.value))}
           style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.2)",borderRadius:8,color:"#fff",padding:"7px 12px",fontFamily:"'Fira Code',monospace",fontSize:11,cursor:"pointer"}}>
@@ -294,6 +303,9 @@ function LeaderboardView({allEntries,isGuest}){
           ))}
         </select>
       </div>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:24,lineHeight:1.6}}>
+        Ranked by each ninja's single best day — daily scores are not added together.
+      </p>
       {ninjaBoard.length===0?(
         <Glass style={{padding:40,textAlign:"center"}}>
           <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>No scores yet for this week. Be the first! 🥷</p>
@@ -324,11 +336,11 @@ function LeaderboardView({allEntries,isGuest}){
                       cursor:isGuest?"default":"pointer",display:"inline-block",
                       textDecoration:isGuest?"none":"underline",textDecorationColor:"rgba(57,255,20,0.3)"}}>{row.name}</div>
                     <div style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.25)",marginTop:2}}>
-                      {row.days.length} day{row.days.length!==1?"s":""} · {totalAttempts} attempt{totalAttempts!==1?"s":""}
+                      best day {row.bestDate?row.bestDate.slice(5):"—"} · {row.days.length} day{row.days.length!==1?"s":""} · {totalAttempts} attempt{totalAttempts!==1?"s":""}
                     </div>
                   </div>
                   <div style={{textAlign:"right",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:"clamp(13px,1.8vw,17px)",color:rank<=3?gc:"#39ff14",textShadow:rank<=3?`0 0 10px ${gc}88`:"0 0 8px #39ff1455"}}>
-                    {row.total.toLocaleString()}
+                    {row.best.toLocaleString()}
                   </div>
                 </div>
               </Glass>
@@ -667,14 +679,18 @@ function EnterScores({allEntries,setAllEntries,setToast}){
           {ninjaSummary?(
             <>
               <div style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:16,color:"#fff",marginBottom:2}}>{ninjaSummary.name}</div>
-              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:14}}>Rank #{ninjaRank} this week · {ninjaSummary.total} pts total</div>
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.35)",marginBottom:14}}>Rank #{ninjaRank} this week · best day {ninjaSummary.best} pts</div>
               <div style={{background:"rgba(255,255,255,0.04)",borderRadius:8,padding:"10px 12px",marginBottom:10}}>
-                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>DAILY TOTALS — ✕ deletes all attempts for that day</div>
+                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>DAILY TOTALS — ⭐ counts for the board · ✕ deletes that day</div>
                 <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                  {ninjaGrouped.sort((a,b)=>a.date.localeCompare(b.date)).map((e,i)=>(
-                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"rgba(57,255,20,0.08)",border:"1px solid #39ff1433",borderRadius:6,padding:"6px 10px"}}>
+                  {ninjaGrouped.sort((a,b)=>a.date.localeCompare(b.date)).map((e,i)=>{
+                    const isBest=e.points===ninjaSummary.best;
+                    return(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      background:isBest?"rgba(255,215,0,0.1)":"rgba(57,255,20,0.08)",
+                      border:`1px solid ${isBest?"#ffd70055":"#39ff1433"}`,borderRadius:6,padding:"6px 10px"}}>
                       <div>
-                        <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"#39ff14"}}>{e.date.slice(5)} → {e.points} pts</span>
+                        <span style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:isBest?"#ffd700":"#39ff14"}}>{e.date.slice(5)} → {e.points} pts{isBest?" ⭐":""}</span>
                         <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.35)",marginLeft:8}}>({e.attempts}/{MAX_ATTEMPTS_PER_DAY} attempt{e.attempts!==1?"s":""})</span>
                       </div>
                       <button onClick={()=>deleteEntry(e)} disabled={!!deleting}
@@ -682,13 +698,14 @@ function EnterScores({allEntries,setAllEntries,setToast}){
                         {deleting===e.date+e.name?<Spinner/>:"✕"}
                       </button>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div style={{background:"rgba(57,255,20,0.08)",border:"1px solid #39ff1433",borderRadius:8,padding:"10px 12px"}}>
-                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:3}}>WEEKLY TOTAL</div>
-                  <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:18,color:"#39ff14"}}>{ninjaSummary.total}</div>
+                <div style={{background:"rgba(255,215,0,0.08)",border:"1px solid #ffd70033",borderRadius:8,padding:"10px 12px"}}>
+                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:3}}>BEST DAY</div>
+                  <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:18,color:"#ffd700"}}>{ninjaSummary.best}</div>
                 </div>
                 <div style={{background:"rgba(0,207,255,0.08)",border:"1px solid #00cfff33",borderRadius:8,padding:"10px 12px"}}>
                   <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:3}}>DAYS PLAYED</div>
