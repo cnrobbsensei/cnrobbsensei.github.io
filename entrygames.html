@@ -551,7 +551,13 @@ function EnterScores({allEntries,setAllEntries,setToast}){
       setPts("");
       setPendingChoice(null);
       const rem=MAX_ATTEMPTS_PER_DAY-(priorAttempts+1);
-      setToast({msg:rem>0?`${normName} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — login access refreshed for ${hours}h`:`${normName} +${p} pts! No more attempts today. ✅`,color:"#39ff14"});
+      // Only the first entry of the day signs the ninja in; later entries
+      // never extend their time — show when it ends instead.
+      const firstToday=priorAttempts===0?newEntry:window.cnFirstEntryOfDay(allEntries.filter(e=>e&&e.name&&e.date===today&&e.name.trim().toLowerCase()===normName.toLowerCase()));
+      const endsAt=window.cnAccessEndsAt(firstToday?firstToday.createdAt:newEntry.createdAt,hours);
+      const endsLabel=new Date(endsAt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+      const timeNote=priorAttempts===0?`signed in for ${hours}h (until ${endsLabel})`:`sign-in time unchanged — still ends at ${endsLabel}`;
+      setToast({msg:rem>0?`${normName} +${p} pts! (${rem} attempt${rem!==1?"s":""} left today) ✅ — ${timeNote}`:`${normName} +${p} pts! No more attempts today. ✅ — ${timeNote}`,color:"#39ff14"});
     } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
@@ -733,7 +739,7 @@ function EnterScores({allEntries,setAllEntries,setToast}){
             </div>
             {hoursLocked&&(
               <p style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#ffd700",marginTop:6,lineHeight:1.5}}>
-                🔒 Already set to {lockedHoursToday}h by {previewName}'s first entry today — this can't be changed again until tomorrow.
+                🔒 Already set to {lockedHoursToday}h by {previewName}'s first entry today — this can't be changed again until tomorrow, and new entries don't add more time.
               </p>
             )}
           </div>

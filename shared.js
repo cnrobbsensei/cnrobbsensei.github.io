@@ -684,14 +684,22 @@
     for(const e of entries || []){
       if(!e || !e.name || e.date !== today) continue;
       const key = e.name.trim().toLowerCase();
-      if(!map[key]) map[key] = {name:e.name.trim(), points:0, attempts:0, lastSeen:0, hours:window.SESSION_HOURS};
+      if(!map[key]) map[key] = {name:e.name.trim(), points:0, attempts:0, lastSeen:0, firstSeen:0, hours:window.SESSION_HOURS};
       const m = map[key];
       m.name = e.name.trim();
       m.points += Number(e.points)||0;
       m.attempts += 1;
-      if((e.createdAt||0) >= m.lastSeen){ m.lastSeen = e.createdAt||0; m.hours = window.cnCleanHours(e.sessionHours); }
+      const t = e.createdAt||0;
+      if(t >= m.lastSeen) m.lastSeen = t;
+      // The FIRST entry of the day is the sign-in: it alone sets the length
+      // and the start time. Later entries add points but never extend it.
+      if(t && (!m.firstSeen || t < m.firstSeen)){ m.firstSeen = t; m.hours = window.cnCleanHours(e.sessionHours); }
     }
-    return Object.values(map).map(m => Object.assign(m, {endsAt: m.lastSeen ? window.cnAccessEndsAt(m.lastSeen, m.hours) : 0}));
+    return Object.values(map).map(m => Object.assign(m, {endsAt: m.firstSeen ? window.cnAccessEndsAt(m.firstSeen, m.hours) : 0}));
+  };
+  // The first (sign-in) entry of the day from a list of one ninja's entries.
+  window.cnFirstEntryOfDay = function(entries){
+    return (entries || []).filter(e => e && e.createdAt).reduce((a,e) => (!a || e.createdAt < a.createdAt) ? e : a, null);
   };
 
   // Minimum time a Sensei must wait between two Points entries for the SAME
@@ -749,11 +757,13 @@
         return stored === firstName || stored === fullTyped;
       });
       if(matches.length === 0) return {ok:false, reason:"not_entered"};
-      const mostRecentEntry = matches.reduce((latest,e)=>(e.createdAt||0) > (latest.createdAt||0) ? e : latest, {createdAt:0});
-      const mostRecent = mostRecentEntry.createdAt || 0;
-      if(!mostRecent) return {ok:false, reason:"not_entered"};
-      const sessionHours = window.cnCleanHours(mostRecentEntry.sessionHours);
-      const endsAt = window.cnAccessEndsAt(mostRecent, sessionHours); // sign-in length + 20 min
+      // Only the day's FIRST entry (the sign-in) counts for timing; later
+      // entries add points but never extend how long the ninja can stay.
+      const firstEntry = window.cnFirstEntryOfDay(matches);
+      const signedInAt = firstEntry ? firstEntry.createdAt : 0;
+      if(!signedInAt) return {ok:false, reason:"not_entered"};
+      const sessionHours = window.cnCleanHours(firstEntry.sessionHours);
+      const endsAt = window.cnAccessEndsAt(signedInAt, sessionHours); // first sign-in + its length + 20 min
       if(Date.now() > endsAt) return {ok:false, reason:"expired"};
       // A Sensei can remove a ninja from "In The Dojo" to revoke today's
       // access immediately, even if the 2-hour window hasn't expired yet.
@@ -762,7 +772,7 @@
       if(revokedFull || revokedFirst) return {ok:false, reason:"removed"};
       // Keep the full login name (e.g. "nathan.blah") as the matched identity,
       // not just the first name, so accountKey/session/display stay correct.
-      return {ok:true, matchedName: trimmed, enteredAt: mostRecent, sessionHours, expiresAt: endsAt};
+      return {ok:true, matchedName: trimmed, enteredAt: signedInAt, sessionHours, expiresAt: endsAt};
     },
 
     // Claims a single-login "slot" for an account (admin, or a given ninja).

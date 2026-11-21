@@ -743,17 +743,24 @@
     let useHours = window.cnCleanHours(hours || window.SESSION_HOURS), lockedNote = "";
     // First entry today = a new sign-in: they start with no goal.
     if(!todays.length && window.cnResetGoalOnSignIn){ try{ await window.cnResetGoalOnSignIn(norm); }catch(e){} }
+    let first = null;
     if(todays.length){
-      const first = todays.reduce((a,b)=>(a.createdAt||0) <= (b.createdAt||0) ? a : b);
+      first = window.cnFirstEntryOfDay(todays) || todays[0];
       const locked = window.cnCleanHours(first.sessionHours);
-      if(hours && hours !== locked) lockedNote = ` (login window stays ${locked}h — it was set by today's first entry)`;
+      if(hours && hours !== locked) lockedNote = ` (sign-in stays ${locked}h — it was set by today's first entry)`;
       useHours = locked;
     }
     const res = await window.fbLeaderboard.addEntry(cw, norm, points, today, useHours);
     try{ sessionStorage.setItem("cn_codebot_last_add", JSON.stringify({week:cw, id:res.id, name:norm, points})); }catch(e){}
     logAction(`Added ${points} pts to ${norm}.`);
     const left = MAX_ATTEMPTS - (todays.length + 1);
-    return {ok:true, msg:`✅ Added **${points} pts** to **${norm}** for today${lockedNote}. ${left} attempt${left===1?"":"s"} left today. Signed in for ${useHours}h (+${window.SESSION_GRACE_MIN||20} min).${todays.length ? "" : " They have no goal yet — assign one on In The Dojo."} (Say **undo** to take it back.)`};
+    // Only the first entry of the day sets the end time; later ones never extend it.
+    const endsAt = window.cnAccessEndsAt(first ? first.createdAt : Date.now(), useHours);
+    const endsLabel = new Date(endsAt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+    const timeNote = first
+      ? `Sign-in time unchanged — still ends at ${endsLabel}.`
+      : `Signed in for ${useHours}h (+${window.SESSION_GRACE_MIN||20} min), until ${endsLabel}. They have no goal yet — assign one on In The Dojo.`;
+    return {ok:true, msg:`✅ Added **${points} pts** to **${norm}** for today${lockedNote}. ${left} attempt${left===1?"":"s"} left today. ${timeNote} (Say **undo** to take it back.)`};
   }
 
   // -------------------------------------------------------------------------
