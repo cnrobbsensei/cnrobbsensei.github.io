@@ -77,7 +77,7 @@
     // within the last 2 hours" login window and the live In The Dojo view.
     async addEntry(week,name,points,date,sessionHours){
       const ref = db.ref(`leaderboards/week_${week}/entries`).push();
-      const cleanHours = Number(sessionHours) === 1 ? 1 : 2;
+      const cleanHours = window.cnCleanHours(sessionHours);
       await ref.set({week,name,points,date,sessionHours:cleanHours,createdAt:Date.now()});
       return {id:ref.key};
     },
@@ -353,26 +353,203 @@
   // (breaks, sessions) so it always lines up with a linked account.
   // -------------------------------------------------------------------------
   window.CN_SECTIONS = ["Impact","JR","Robotics","Unity"];
+
+  // Code Ninjas IMPACT curriculum, per belt. Each activity set is
+  // [level, Project (Build), Explore, Debugging, Quest & Adventure].
+  // Senseis pick goals for Impact ninjas from these instead of typing them.
+  window.CN_GOAL_PARTS = [
+    {id:"build", label:"Build", col:1},
+    {id:"explore", label:"Explore", col:2},
+    {id:"debug", label:"Debugging", col:3},
+    {id:"quest", label:"Quest & Adventure", col:4},
+  ];
+  window.CN_CURRICULUM = {
+    Impact: [
+      {belt:"White", color:"#64748b", sets:[
+        [1,"Your First Sprite","Moving Sprites Around","Debugging Our First Bugs!","Level 1 Quest & Adventure"],
+        [2,"Meet New Friends!","Naming Sprites","Debugging Sequence #1","Level 2 Quest & Adventure"],
+        [2,"Where’s My Puppy?","Sequencing Blocks","Debugging Sequence #2","Level 2 Quest & Adventure"],
+        [3,"Fly Me to the Moon!","Moving Sprites with the Direction Buttons","Debugging Sprite Movement","Level 3 Quest & Adventure"],
+        [3,"Dinner Time!","Sprite Layers","Debugging Sprite Layers","Level 3 Quest & Adventure"],
+        [4,"A Piece of Cake","Overlapping Sprite Functions","Debugging Overlap Blocks","Level 4 Quest & Adventure"],
+        [4,"Underwater Food Chain","Sprite Kinds and Parameters","Debugging Sprite Kinds and Parameters","Level 4 Quest & Adventure"],
+      ]},
+      {belt:"Yellow", color:"#b8860b", sets:[
+        [1,"The Mushroom and the Munchy Munchy Monkey","Life and Countdown Variables","Debugging Life and Countdown Variables","Level 1 Quest & Adventure"],
+        [1,"Pearl Collector","Score and Countdown Variables","Debugging Life and Score Variables","Level 1 Quest & Adventure"],
+        [2,"Avoid the Asteroids!","Game Update Loops and Random Numbers","Debugging Loops, Velocity and Randomness!","Level 2 Quest & Adventure"],
+        [2,"Space Adventure","Sprite Velocity","Debugging Projectiles","Level 2 Quest & Adventure"],
+        [3,"The Wizard’s Mystic Toadstools","If/Then Conditionals","Debugging If/Then Conditionals","Level 3 Quest & Adventure"],
+        [3,"Unlock the Hidden Treasure!","If/Then/Else Conditionals","Debugging If/Then/Else Conditionals","Level 3 Quest & Adventure"],
+        [4,"Animated Aquarium","Sprite Animation","Debugging Animations","Yellow Belt Mastery Mission"],
+        [4,"Musical Mayhem","Melody Blocks","Debugging Music Blocks","Yellow Belt Mastery Mission"],
+      ]},
+      {belt:"Orange", color:"#d97706", sets:[
+        [1,"Avoid the Snakes!","Tilemaps and Walls","Debugging Tilemaps","Level 1 Quest & Adventure"],
+        [1,"Carrot Chase","Large-Scale Tilemaps","Debugging Walls and Tiles in Tilemaps","Level 1 Quest & Adventure"],
+        [2,"The Key to the Castle","Tilemap Overlap Events","Debugging Tilemap Overlap Events","Level 2 Quest & Adventure"],
+        [2,"Coin Grabber!","Lifecycle Events","Debugging Lifecycle Events","Level 2 Quest & Adventure"],
+        [3,"All About Me","Variables and Strings","Debugging Variables and Strings","Level 3 Quest & Adventure"],
+        [3,"Welcome to the Farm","Image Arrays","Debugging Image Arrays","Level 3 Quest & Adventure"],
+        [3,"Mad Libs","Text Arrays","Debugging Text Arrays","Level 3 Quest & Adventure"],
+        [4,"Memory Game","Repeat Loops","Debugging Repeat Loops","Level 4 Quest & Adventure"],
+        [4,"Archeological Dig","For Element Loops","Debugging For Element Loops","Level 4 Quest & Adventure"],
+        [5,"Cookie Clicker Game!","Functions","Debugging Functions","Level 5 Quest & Adventure"],
+        [5,"Snowflake Catch","Functions with Parameters","Debugging Functions with Parameters","Level 5 Quest & Adventure"],
+      ]},
+      {belt:"Green", color:"#15803d", sets:[
+        [1,"Cactus Jump","Acceleration and Velocity","Debugging Acceleration and Velocity","Level 1 Quest & Adventure"],
+        [1,"Avoid the Roadblocks","Spawning Sprites","Debugging 2D Tilemap Designs","Level 1 Quest & Adventure"],
+        [1,"The Floor is Lava!","2D Tilemaps","Debugging 2D Tilemaps","Level 1 Quest & Adventure"],
+        [2,"Magic Coin Scavenger Hunt","AND Booleans","Debugging AND Booleans","Level 2 Quest & Adventure"],
+        [2,"Raindrop Invisibility","NOT Booleans","Debugging NOT Booleans","Level 2 Quest & Adventure"],
+        [2,"Snake Pit!","OR Booleans","Debugging OR Booleans","Level 2 Quest & Adventure"],
+        [3,"Bubble Pop!","For Index Loops","Debugging For Index Loops","Level 3 Quest & Adventure"],
+        [3,"Bee Catcher","While Loops","Debugging While Loops","Level 3 Quest & Adventure"],
+        [4,"Block Jumper","Tilemap Location Blocks","Debugging Tilemap Location Blocks","Level 4 Quest & Adventure"],
+        [4,"Bridge Builder","Tilemap Location Blocks and Operators","Debugging Tilemap Location Blocks and Operators","Level 4 Quest & Adventure"],
+        [4,"Dino Defender","Tilemap Extension Blocks","Debugging Tilemap Extension Blocks","Level 4 Quest & Adventure"],
+        [5,"Scenic Drive","Scroller Extension Blocks","Debugging Scroller Extension Blocks","Green Belt Mastery Mission"],
+        [5,"Burger Dash","Status Bar Extension Blocks","Debugging Status Bar Extension Blocks","Green Belt Mastery Mission"],
+      ]},
+      {belt:"Blue", color:"#2563eb", sets:[
+        [1,"hello world!","Setting Sprites","Debugging Setting Sprites","Level 1 Quest & Adventure"],
+        [1,"Bouncing on the Walls","Moving Sprites","Debugging Sprite Effects","Level 1 Quest & Adventure"],
+        [1,"Follow Me!","Sprite Movements","Debugging Sprite Movements","Level 1 Quest & Adventure"],
+        [2,"Greeting Card","Properties and Text Parameters","Debugging Properties and Text Parameters","Level 2 Quest & Adventure"],
+        [2,"Show Time!","Effect Parameters and Sequencing","Debugging Effect Parameters and Sequencing","Level 2 Quest & Adventure"],
+        [2,"Seasons Change","Dialog Boxes, Sounds, and Code Comments","Debugging Code Comments and Dialog Boxes","Level 2 Quest & Adventure"],
+        [3,"Screen Saver","Block Statements and Loops","Debugging Block Statements and Loops","Level 3 Quest & Adventure"],
+        [3,"Button Clicker!","Block Statements and Events","Debugging Block Statements and Events","Level 3 Quest & Adventure"],
+        [3,"Two Sprite Showdown!","Screen Positions and Multiplayer Score","Debugging Screen Positions and Multiplayer Score","Level 3 Quest & Adventure"],
+        [4,"Save the Crab!","Nested Block Statements and If Conditionals","Debugging Nested Block Statements and If Conditionals","Level 4 Quest & Adventure"],
+        [4,"Going Bananas!","Nested Block Statements and If/Else Conditionals","Debugging Nested Block Statements and If/Else Conditionals","Level 4 Quest & Adventure"],
+        [4,"Grab Bag!","Nested Block Statements and If/Else If/Else Conditionals","Debugging Nested Block Statements and If/Else If/Else Conditionals","Level 4 Quest & Adventure"],
+        [5,"Shop Til You Drop","Variables, Concatenation, and Assignment Operators","Debugging Variables, Concatenation, and Assignment Operators","Level 5 Quest & Adventure"],
+        [5,"Cookie Stacker","Assignment and Equality Operators","Debugging Variables, Equality Operators, and Math Operators","Level 5 Quest & Adventure"],
+        [6,"Shooting Hoops!","Boolean AND Operators and Relational Operators","Debugging Boolean AND Operators and Relational Operators","Level 6 Quest & Adventure"],
+        [6,"Guess the Number!","Boolean OR Operators","Debugging Boolean OR Operators","Level 6 Quest & Adventure"],
+      ]},
+      {belt:"Purple", color:"#7c3aed", sets:[
+        [1,"Collect the Honey!","Sprite Kinds and Overlap Events","Debugging Sprite Kinds and Overlap Events","Level 1 Quest & Adventure"],
+        [1,"Snowball Fight!","Sprite Kinds and Overlap Events","Debugging Sprite Kinds and Projectiles","Level 1 Quest & Adventure"],
+        [1,"Asteroid Attack!","Sprite Kinds and onCreated Events","Debugging Sprite Kinds and onCreated Events","Level 1 Quest & Adventure"],
+        [2,"Fireflies Collector","For Loops","Debugging For Loops","Level 2 Quest & Adventure"],
+        [2,"Counting Sprites","Incrementing and Decrementing For Loops","Debugging Incrementing and Decrementing For Loops","Level 2 Quest & Adventure"],
+        [2,"Mystery Boxes!","Nested For Loops and Increment Operators","Debugging Nested For Loops and Increment Operators","Level 2 Quest & Adventure"],
+        [3,"Magic 8 Ball","Arrays","Debugging Arrays","Level 3 Quest & Adventure"],
+        [3,"What’s in a Name?","Empty Arrays and Array Functions","Debugging Empty Arrays","Level 3 Quest & Adventure"],
+        [3,"Concentration","Array Indices and For Element Of Loops","Debugging Array Indices and For Element Of Loops","Level 3 Quest & Adventure"],
+        [4,"Match Game","Array Index Values","Debugging Array Index Values","Level 4 Quest & Adventure"],
+        [4,"Username Generator","Nested Arrays","Debugging Nested Arrays","Level 4 Quest & Adventure"],
+        [4,"Memory Match","Array Functions","Debugging Array Functions","Level 4 Quest & Adventure"],
+        [5,"Pizza Party","Functions with Parameters","Debugging Functions with Parameters","Level 5 Quest & Adventure"],
+        [5,"Barn Breakout!","Refactoring and Function Scope","Debugging Multiple Functions","Level 5 Quest & Adventure"],
+        [5,"Damage Control","Function Documentation and Calling Functions","Debugging Functions with Multiple Parameters","Level 5 Quest & Adventure"],
+        [6,"Escape the Haunted Castle!","Animation and Music","Debugging Animation and Music","Purple Belt Mastery Mission"],
+        [6,"City Scroller","Scroller Extension","Debugging the Scroller Extension","Purple Belt Mastery Mission"],
+        [6,"Find the Ninja!","Story Extension","Debugging the Story Extension","Purple Belt Mastery Mission"],
+      ]},
+      {belt:"Brown", color:"#92400e", sets:[
+        [1,"The Bookcase","Tilemap Assets","Debugging Assets and Tilemaps","Level 1 Quest & Adventure"],
+        [1,"Shark Attack","Spawn Tiles and Camera Functions","Debugging Tilemap Location and Camera Functions","Level 1 Quest & Adventure"],
+        [2,"Two Worlds","Tile Overlap Events","Debugging Tile Overlap Events","Level 2 Quest & Adventure"],
+        [2,"Avoid the Haystacks!","Tilemap Wall Events","Debugging Tilemap Walls","Level 2 Quest & Adventure"],
+        [3,"Dust Mite Adventure","2D Tilemap Movement","Debugging 2D Tilemap Movement","Level 3 Quest & Adventure"],
+        [3,"Gravity Jumper","Sprite Movement with Functions","Debugging Sprite Movement with Functions","Level 3 Quest & Adventure"],
+        [3,"Salmon Catch","Tile Overlaps and While Loops","Debugging Tile Overlaps and While Loops","Level 3 Quest & Adventure"],
+        [4,"A Walk through the Seasons","Image Editing and Scrolling Backgrounds","Debugging Customized Assets and the Scroller Extension","Level 4 Quest & Adventure"],
+        [4,"A Change of Scenery","Image Modification and Cycling Through Assets","Debugging Cycling through Assets","Level 4 Quest & Adventure"],
+        [5,"Creating Custom Pixel Art","Custom Pixel Art","Debugging Custom Pixel Art","Level 5 Quest & Adventure"],
+        [5,"Pixel Art Colors & Outlines","Pixel Art Colors & Outlines","Debugging Pixel Art Colors & Outlines","Level 5 Quest & Adventure"],
+        [5,"Pixel Art Shading - Shadows & Reflections","Pixel Art Shading - Shadows & Reflections","Debugging Pixel Art Shading","Level 5 Quest & Adventure"],
+        [5,"Pixel Art Dithering","Dithering in Pixel Art","Debugging Dithering in Pixel Art","Level 5 Quest & Adventure"],
+        [5,"Creating Pixel Art in Multiple Sizes","Pixel Art in Multiple Sizes","Debugging Pixel Art in Multiple Sizes","Level 5 Quest & Adventure"],
+        [6,"Create Sprites from Multiple Perspectives","Pixel Art Sprite Perspectives","Debugging Sprite Perspectives","Level 6 Quest & Adventure"],
+        [6,"Create a Color Palette for a Sprite Pack","Pixel Art Sprite Packs","Debugging Pixel Art Sprite Packs","Level 6 Quest & Adventure"],
+        [6,"Creating and Using a Sprite Pack","Creating and Using Sprite Packs","Debugging Projectile Sprite Perspectives","Level 6 Quest & Adventure"],
+        [7,"Animation Techniques","Squash and Stretch","Debugging Animation Techniques","Level 7 Quest & Adventure"],
+        [7,"A Cozy Evening","Animation Layers","Debugging Animating Multiple Sprite Movement","Level 7 Quest & Adventure"],
+        [7,"Super Ninja!","Sprite Walk Cycles","Debugging Sprite Animation","Level 7 Quest & Adventure"],
+        [8,"Hills and Ladders","Creating 2D Tilemap Tiles","Debugging 2D Tilemap Tiles","Level 8 Quest & Adventure"],
+        [8,"We Built this City!","Building with Multiple Custom Tiles","Debugging Building with Multiple Custom Tiles","Level 8 Quest & Adventure"],
+        [9,"Maze Masters","Text Sprites","Debugging Text Sprites","Level 9 Quest & Adventure"],
+        [9,"A Pet’s Day","Full Screen Image Assets","Debugging Scene Sequence and Dialog Text","Level 9 Quest & Adventure"],
+        [10,"Painter’s Palette","Pixel Color Functions","Debugging Pixel Color Functions","Brown Belt Mastery Mission"],
+        [10,"Maps of all Sizes!","Minimaps","Debugging Minimaps","Brown Belt Mastery Mission"],
+        [10,"Feed The Hungry Dinos!","Status Bars and Timers","Debugging Timers and Status Bars","Brown Belt Mastery Mission"],
+        [10,"Museum Heist","Raycasting","Debugging Raycasting","Brown Belt Mastery Mission"],
+      ]},
+      {belt:"Red", color:"#b91c1c", sets:[
+        [1,"First Hole","Sprite Physics","Debugging Sprite Physics","Adventure Golf"],
+        [1,"A Multi-Perspective Golf Course","Multi-Tilemap Game Mechanics","Debugging Tilemap Transitions","Adventure Golf"],
+        [1,"Adventure Golf","UI/UX Features","Debugging Projects Using the setText Function","Adventure Golf"],
+        [2,"First Wave","Setting Towers and Launching Projectiles","Debugging Projectile Movement","Tower Defense Project"],
+        [2,"Many Enemies, Many Paths!","Enemy Sprite Movement and On-Screen Text","Debugging Sprite Movement and Image Consistency","Tower Defense Project"],
+        [2,"Inventory Menu","Creating an Inventory Menu","Image Functions","Tower Defense Project"],
+        [2,"Finishing Touches","Project Scene Organization","Debugging Code by Project Scene","Tower Defense Project"],
+      ]},
+      // Black Belt is a single capstone — no separate debugging activity.
+      {belt:"Black", color:"#111827", sets:[
+        [1,"Capstone Project!","Planning, design, coding, UI/UX and playtesting",null,"Original independent project"],
+      ]},
+    ],
+  };
+  // Builds the goal text shown on the kiosk, e.g.
+  // "Yellow Belt · L2 · Build: Avoid the Asteroids!"
+  window.cnCurriculumGoalText = function(section, beltName, setIdx, partId){
+    const belts = (window.CN_CURRICULUM[section] || []);
+    const belt = belts.find(b => b.belt === beltName);
+    const set = belt && belt.sets[setIdx];
+    const part = window.CN_GOAL_PARTS.find(p => p.id === partId);
+    if(!belt || !set || !part || !set[part.col]) return "";
+    return `${belt.belt} Belt · L${set[0]} · ${part.label}: ${set[part.col]}`;
+  };
+
+  // Goals only last for the ninja's current visit: each one is stamped with
+  // the day it was set, a ninja's first Points entry of the day wipes it
+  // ("new sign-in = no goal"), and CodeBot deletes it once their sign-in
+  // window closes. Anything not from today is treated as no goal.
+  window.cnGoalActive = function(g){ return !!(g && g.goal && g.date === window.todayStr()); };
+  function activeGoals(all){
+    const out = {};
+    for(const [k,g] of Object.entries(all || {})) if(window.cnGoalActive(g)) out[k] = g;
+    return out;
+  }
   window.fbGoals = {
     async getAll(){
       const snap = await db.ref("goals").once("value");
-      return snap.val() || {};
+      return activeGoals(snap.val());
     },
-    async setGoal(accountKey, name, section, goal){
-      await db.ref(`goals/${accountKey}`).set({
-        name: name || "", section: section || "", goal: goal || "", updatedAt: Date.now()
-      });
+    // extra: optional structured info, e.g. {belt, setIdx, part, project}
+    async setGoal(accountKey, name, section, goal, extra){
+      await db.ref(`goals/${accountKey}`).set(Object.assign({
+        name: name || "", section: section || "", goal: goal || "", date: window.todayStr(), updatedAt: Date.now()
+      }, extra || {}));
     },
     async clearGoal(accountKey){
+      if(!accountKey) return;
       await db.ref(`goals/${accountKey}`).remove();
     },
     // Realtime listener — fires immediately on any change, from any window.
+    // Only today's goals are passed on.
     listen(callback){
       const ref = db.ref("goals");
-      const handler = snap => callback(snap.val() || {});
+      const handler = snap => callback(activeGoals(snap.val()));
       ref.on("value", handler);
       return () => ref.off("value", handler);
     }
+  };
+  // Called when a ninja gets their FIRST Points entry of the day: they start
+  // the visit with no goal until a Sensei assigns one.
+  window.cnResetGoalOnSignIn = async function(name, usernames){
+    const keys = new Set([window.cnKeySafe(name)]);
+    try{
+      const list = usernames || await window.fbUsernames.getAll();
+      const linked = window.findLinkedAccount(name, list);
+      if(linked) keys.add(window.cnKeySafe(linked));
+    }catch(e){}
+    await Promise.all([...keys].map(k => window.fbGoals.clearGoal(k).catch(()=>{})));
   };
 
   // -------------------------------------------------------------------------
@@ -479,8 +656,43 @@
   //  - Firebase "activeSessions/<account>" enforces a single login per
   //    account (admin or a given ninja) at a time.
   // -------------------------------------------------------------------------
-  window.SESSION_HOURS = 2;
+  window.SESSION_HOURS = 2; // default sign-in length
+  // Sign-in lengths a Sensei can pick on Points (hours).
+  window.CN_SESSION_HOUR_OPTIONS = [1, 2, 3];
+  // A ninja stays signed in / listed in the dojo for their sign-in length
+  // PLUS this much extra time.
+  window.SESSION_GRACE_MIN = 20;
+  window.SESSION_GRACE_MS = window.SESSION_GRACE_MIN*60*1000;
+  // Max Points entries per ninja per day (Points tab + CodeBot both enforce it).
+  window.CN_MAX_ATTEMPTS_PER_DAY = 3;
   window.SESSION_MS = window.SESSION_HOURS*60*60*1000;
+  window.cnCleanHours = function(h){
+    const n = Number(h);
+    return window.CN_SESSION_HOUR_OPTIONS.includes(n) ? n : window.SESSION_HOURS;
+  };
+  // When a ninja's access ends, given the time of their latest Points entry
+  // today and its sign-in length. The single rule used by login, In The Dojo,
+  // the kiosk, CodeBot and goal clean-up.
+  window.cnAccessEndsAt = function(createdAt, hours){
+    return (Number(createdAt)||0) + window.cnCleanHours(hours)*60*60*1000 + window.SESSION_GRACE_MS;
+  };
+  // Today's Points entries -> one row per ninja: {name, points, attempts,
+  // lastSeen (latest entry time), hours (that entry's sign-in length), endsAt}.
+  window.cnPresenceFromEntries = function(entries, today){
+    today = today || window.todayStr();
+    const map = {};
+    for(const e of entries || []){
+      if(!e || !e.name || e.date !== today) continue;
+      const key = e.name.trim().toLowerCase();
+      if(!map[key]) map[key] = {name:e.name.trim(), points:0, attempts:0, lastSeen:0, hours:window.SESSION_HOURS};
+      const m = map[key];
+      m.name = e.name.trim();
+      m.points += Number(e.points)||0;
+      m.attempts += 1;
+      if((e.createdAt||0) >= m.lastSeen){ m.lastSeen = e.createdAt||0; m.hours = window.cnCleanHours(e.sessionHours); }
+    }
+    return Object.values(map).map(m => Object.assign(m, {endsAt: m.lastSeen ? window.cnAccessEndsAt(m.lastSeen, m.hours) : 0}));
+  };
 
   // Minimum time a Sensei must wait between two Points entries for the SAME
   // ninja (regardless of which day each entry is logged against — this is a
@@ -540,9 +752,9 @@
       const mostRecentEntry = matches.reduce((latest,e)=>(e.createdAt||0) > (latest.createdAt||0) ? e : latest, {createdAt:0});
       const mostRecent = mostRecentEntry.createdAt || 0;
       if(!mostRecent) return {ok:false, reason:"not_entered"};
-      const sessionHours = Number(mostRecentEntry.sessionHours) === 1 ? 1 : window.SESSION_HOURS;
-      const sessionMs = sessionHours*60*60*1000;
-      if(Date.now() - mostRecent > sessionMs) return {ok:false, reason:"expired"};
+      const sessionHours = window.cnCleanHours(mostRecentEntry.sessionHours);
+      const endsAt = window.cnAccessEndsAt(mostRecent, sessionHours); // sign-in length + 20 min
+      if(Date.now() > endsAt) return {ok:false, reason:"expired"};
       // A Sensei can remove a ninja from "In The Dojo" to revoke today's
       // access immediately, even if the 2-hour window hasn't expired yet.
       const revokedFull = await window.fbAccessRevocation.isRevokedToday(window.cnKeySafe(fullTyped));
@@ -550,7 +762,7 @@
       if(revokedFull || revokedFirst) return {ok:false, reason:"removed"};
       // Keep the full login name (e.g. "nathan.blah") as the matched identity,
       // not just the first name, so accountKey/session/display stay correct.
-      return {ok:true, matchedName: trimmed, enteredAt: mostRecent, sessionHours, expiresAt: mostRecent + sessionMs};
+      return {ok:true, matchedName: trimmed, enteredAt: mostRecent, sessionHours, expiresAt: endsAt};
     },
 
     // Claims a single-login "slot" for an account (admin, or a given ninja).
@@ -923,5 +1135,118 @@
     );
 
     return h(React.Fragment, null, spotlight, card);
+  };
+
+  // -------------------------------------------------------------------------
+  // In-page dialogs — replace the browser's native prompt()/alert() popups
+  // with styled modals that match the site. Plain DOM (no React) so any page
+  // or script can await them.
+  //   await cnDialog.password({title, message, confirmLabel, danger})
+  //     -> true once the correct Sensei password is entered, false on cancel.
+  //        The input is masked; a wrong password shows an inline error and
+  //        lets the Sensei retry without reopening anything.
+  //   await cnDialog.alert(message, {title})
+  // -------------------------------------------------------------------------
+  function cnDialogStyles(){
+    if(document.getElementById("cn-dialog-styles")) return;
+    const st = document.createElement("style");
+    st.id = "cn-dialog-styles";
+    st.textContent = `
+      .cn-dlg-back{position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;
+        background:rgba(0,0,0,0.72);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px);animation:cnDlgFade .15s ease}
+      .cn-dlg{width:100%;max-width:380px;background:rgba(12,12,20,0.98);border:1px solid rgba(57,255,20,0.3);border-radius:16px;
+        padding:22px;box-shadow:0 20px 60px rgba(0,0,0,0.6),0 0 30px rgba(57,255,20,0.12);font-family:'Exo 2',sans-serif;color:#fff;
+        animation:cnDlgPop .2s ease}
+      .cn-dlg.danger{border-color:rgba(255,45,120,0.4);box-shadow:0 20px 60px rgba(0,0,0,0.6),0 0 30px rgba(255,45,120,0.15)}
+      .cn-dlg h3{font-family:'Orbitron',sans-serif;font-size:14px;margin:0 0 8px;color:#fff;letter-spacing:.5px}
+      .cn-dlg p{font-size:13px;line-height:1.55;color:rgba(255,255,255,0.65);margin:0 0 16px}
+      .cn-dlg label{display:block;font-family:'Fira Code',monospace;font-size:10px;letter-spacing:1px;color:rgba(255,255,255,0.45);margin-bottom:7px}
+      .cn-dlg input{width:100%;box-sizing:border-box;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.18);border-radius:10px;
+        padding:11px 14px;color:#fff;font-size:15px;outline:none;font-family:'Fira Code',monospace;letter-spacing:2px}
+      .cn-dlg input:focus{border-color:#39ff14}
+      .cn-dlg input.bad{border-color:#ff2d78;animation:cnDlgShake .3s}
+      .cn-dlg .err{min-height:16px;font-family:'Fira Code',monospace;font-size:10px;color:#ff2d78;margin:6px 0 10px}
+      .cn-dlg .row{display:flex;gap:8px}
+      .cn-dlg button{flex:1;padding:10px;border-radius:9px;cursor:pointer;font-family:'Orbitron',sans-serif;font-weight:700;font-size:11px;letter-spacing:1px}
+      .cn-dlg .cancel{border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.05);color:rgba(255,255,255,0.6)}
+      .cn-dlg .ok{border:none;background:linear-gradient(135deg,#39ff14,#00cfff);color:#000}
+      .cn-dlg.danger .ok{background:linear-gradient(135deg,#ff2d78,#ff8c00)}
+      @keyframes cnDlgFade{from{opacity:0}to{opacity:1}}
+      @keyframes cnDlgPop{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+      @keyframes cnDlgShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+    `;
+    document.head.appendChild(st);
+  }
+  function cnEl(tag, attrs, children){
+    const el = document.createElement(tag);
+    if(attrs) for(const [k,v] of Object.entries(attrs)){
+      if(k === "text") el.textContent = v;
+      else if(k === "class") el.className = v;
+      else el.setAttribute(k, v);
+    }
+    (children||[]).forEach(c => c && el.appendChild(c));
+    return el;
+  }
+  window.cnDialog = {
+    password(opts){
+      opts = opts || {};
+      cnDialogStyles();
+      return new Promise(resolve => {
+        const input = cnEl("input",{type:"password",autocomplete:"off",placeholder:"••••••••"});
+        const err = cnEl("div",{class:"err"});
+        const cancel = cnEl("button",{class:"cancel",type:"button",text:"CANCEL"});
+        const ok = cnEl("button",{class:"ok",type:"button",text:opts.confirmLabel || "CONFIRM"});
+        const box = cnEl("div",{class:"cn-dlg"+(opts.danger?" danger":""),role:"dialog","aria-modal":"true"},[
+          cnEl("h3",{text:opts.title || "🔐 Sensei password"}),
+          opts.message ? cnEl("p",{text:opts.message}) : null,
+          cnEl("label",{text:"SENSEI PASSWORD"}),
+          input, err,
+          cnEl("div",{class:"row"},[cancel, ok])
+        ]);
+        const back = cnEl("div",{class:"cn-dlg-back"},[box]);
+        function close(result){
+          document.removeEventListener("keydown", onKey, true);
+          back.remove();
+          resolve(result);
+        }
+        function attempt(){
+          if(input.value === window.CN_ADMIN_PASS){ close(true); return; }
+          err.textContent = input.value ? "Incorrect password — try again." : "Enter the password.";
+          input.classList.remove("bad"); void input.offsetWidth; input.classList.add("bad");
+          input.select();
+        }
+        function onKey(e){
+          if(e.key === "Escape"){ e.stopPropagation(); close(false); }
+          else if(e.key === "Enter"){ e.preventDefault(); attempt(); }
+        }
+        cancel.onclick = () => close(false);
+        ok.onclick = attempt;
+        back.onclick = e => { if(e.target === back) close(false); };
+        input.oninput = () => { err.textContent = ""; input.classList.remove("bad"); };
+        document.addEventListener("keydown", onKey, true);
+        document.body.appendChild(back);
+        setTimeout(()=>input.focus(), 30);
+      });
+    },
+    alert(message, opts){
+      opts = opts || {};
+      cnDialogStyles();
+      return new Promise(resolve => {
+        const ok = cnEl("button",{class:"ok",type:"button",text:"OK"});
+        const box = cnEl("div",{class:"cn-dlg"+(opts.danger?" danger":""),role:"alertdialog","aria-modal":"true"},[
+          cnEl("h3",{text:opts.title || "Heads up"}),
+          cnEl("p",{text:String(message||"")}),
+          cnEl("div",{class:"row"},[ok])
+        ]);
+        const back = cnEl("div",{class:"cn-dlg-back"},[box]);
+        function close(){ document.removeEventListener("keydown", onKey, true); back.remove(); resolve(); }
+        function onKey(e){ if(e.key === "Escape" || e.key === "Enter"){ e.preventDefault(); close(); } }
+        ok.onclick = close;
+        back.onclick = e => { if(e.target === back) close(); };
+        document.addEventListener("keydown", onKey, true);
+        document.body.appendChild(back);
+        setTimeout(()=>ok.focus(), 30);
+      });
+    }
   };
 })();

@@ -28,6 +28,8 @@ html,body{height:100%;background:#060609;color:#fff;}
 <body>
 <div id="root"></div>
 <script src="shared.js"></script>
+<script src="codebot.js"></script>
+<script src="codebot-ai.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
 const TourOverlay = window.CnTourOverlay;
@@ -184,7 +186,11 @@ function openKioskDisplay(){
     `width=${w},height=${h},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes`);
 }
 
-// Inline per-ninja goal assignment: a section dropdown + short goal text,
+const GOAL_SELECT = {width:"100%",marginBottom:6,padding:"6px 8px",borderRadius:6,background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:10};
+
+// Inline per-ninja goal assignment: a section dropdown, then (for Impact) the
+// curriculum Belt -> Activity -> Part dropdowns, or a short goal text for
+// sections without a curriculum list. Goals last for today's visit only,
 // saved straight to Firebase. Every open Kiosk window (and every other
 // Sensei's "In The Dojo" tab) picks the change up immediately via
 // window.fbGoals.listen — no refresh needed anywhere.
@@ -192,22 +198,41 @@ function GoalEditor({account,current}){
   const [editing,setEditing]=useState(false);
   const [section,setSection]=useState((current&&current.section)||window.CN_SECTIONS[0]);
   const [goal,setGoal]=useState((current&&current.goal)||"");
+  // Curriculum picks (Impact): belt -> activity set -> part
+  const [belt,setBelt]=useState((current&&current.belt)||"");
+  const [setIdx,setSetIdx]=useState(current&&Number.isInteger(current.setIdx)?String(current.setIdx):"");
+  const [part,setPart]=useState((current&&current.part)||"");
   const [saving,setSaving]=useState(false);
 
   useEffect(()=>{
     if(!editing){
       setSection((current&&current.section)||window.CN_SECTIONS[0]);
       setGoal((current&&current.goal)||"");
+      setBelt((current&&current.belt)||"");
+      setSetIdx(current&&Number.isInteger(current.setIdx)?String(current.setIdx):"");
+      setPart((current&&current.part)||"");
     }
   },[current,editing]);
 
+  const curriculum = (window.CN_CURRICULUM||{})[section] || null;
+  const beltObj = curriculum ? curriculum.find(b=>b.belt===belt) : null;
+  const setObj = beltObj && setIdx!=="" ? beltObj.sets[Number(setIdx)] : null;
+  const parts = setObj ? window.CN_GOAL_PARTS.filter(p=>!!setObj[p.col]) : [];
+  const curriculumGoal = curriculum ? window.cnCurriculumGoalText(section, belt, Number(setIdx), part) : "";
+  const canSave = curriculum ? !!curriculumGoal : !!goal.trim();
+
   async function save(){
-    if(!account||saving) return;
+    if(!account||saving||!canSave) return;
     setSaving(true);
     try{
-      await window.fbGoals.setGoal(window.cnKeySafe(account), account, section, goal.trim());
+      if(curriculum){
+        await window.fbGoals.setGoal(window.cnKeySafe(account), account, section, curriculumGoal,
+          {belt, setIdx:Number(setIdx), part, project:setObj[1]});
+      } else {
+        await window.fbGoals.setGoal(window.cnKeySafe(account), account, section, goal.trim());
+      }
       setEditing(false);
-    }catch(e){ console.warn(e); alert("Couldn't save the goal. Please try again."); }
+    }catch(e){ console.warn(e); window.cnDialog.alert("Couldn't save the goal. Please try again."); }
     setSaving(false);
   }
   async function clear(){
@@ -231,7 +256,7 @@ function GoalEditor({account,current}){
                 </div>
               </>
             ):(
-              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)"}}>No goal set yet</div>
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#ffd700"}}>🎯 No goal yet — assign one</div>
             )}
           </div>
           {account&&(
@@ -247,15 +272,38 @@ function GoalEditor({account,current}){
 
   return(
     <div style={{marginTop:8,padding:"10px",borderRadius:8,background:"rgba(0,207,255,0.06)",border:"1px solid #00cfff33"}}>
-      <select value={section} onChange={e=>setSection(e.target.value)} style={{width:"100%",marginBottom:6,padding:"6px 8px",borderRadius:6,
-        background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:10}}>
+      <select value={section} onChange={e=>{setSection(e.target.value);setBelt("");setSetIdx("");setPart("");}} style={GOAL_SELECT}>
         {window.CN_SECTIONS.map(s=><option key={s} value={s}>{s}</option>)}
       </select>
-      <input value={goal} onChange={e=>setGoal(e.target.value)} placeholder="Project goal (e.g. Finish the maze level)"
-        style={{width:"100%",marginBottom:8,padding:"6px 8px",borderRadius:6,background:"rgba(0,0,0,0.4)",
-          border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:11}}/>
+      {curriculum?(
+        <>
+          <select value={belt} onChange={e=>{setBelt(e.target.value);setSetIdx("");setPart("");}} style={GOAL_SELECT}>
+            <option value="">— Belt —</option>
+            {curriculum.map(b=><option key={b.belt} value={b.belt}>{b.belt} Belt</option>)}
+          </select>
+          {beltObj&&(
+            <select value={setIdx} onChange={e=>{setSetIdx(e.target.value);setPart("build");}} style={GOAL_SELECT}>
+              <option value="">— Activity —</option>
+              {beltObj.sets.map((st,i)=><option key={i} value={String(i)}>Level {st[0]} · {st[1]}</option>)}
+            </select>
+          )}
+          {setObj&&(
+            <select value={part} onChange={e=>setPart(e.target.value)} style={GOAL_SELECT}>
+              {parts.map(p=><option key={p.id} value={p.id}>{p.label}: {setObj[p.col]}</option>)}
+            </select>
+          )}
+          {curriculumGoal&&(
+            <div style={{marginBottom:8,fontFamily:"'Exo 2',sans-serif",fontSize:10.5,color:"#00cfff",lineHeight:1.4}}>🎯 {curriculumGoal}</div>
+          )}
+        </>
+      ):(
+        <input value={goal} onChange={e=>setGoal(e.target.value)} placeholder="Project goal (e.g. Finish the maze level)"
+          style={{width:"100%",marginBottom:8,padding:"6px 8px",borderRadius:6,background:"rgba(0,0,0,0.4)",
+            border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:11}}/>
+      )}
       <div style={{display:"flex",gap:6}}>
-        <button onClick={save} disabled={saving} style={{flex:1,padding:"7px",borderRadius:7,border:"none",cursor:saving?"not-allowed":"pointer",
+        <button onClick={save} disabled={saving||!canSave} style={{flex:1,padding:"7px",borderRadius:7,border:"none",cursor:saving||!canSave?"not-allowed":"pointer",
+          opacity:canSave?1:0.45,
           background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:9,letterSpacing:.5}}>
           {saving?"...":"💾 Save"}
         </button>
@@ -290,16 +338,9 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
   // that timestamp is within the last SESSION_HOURS — this mirrors the exact
   // window that controls whether their login still works, so "In The Dojo"
   // always reflects who can currently sign in.
-  const map = {};
-  todayEntries.forEach(e=>{
-    if(!e||!e.name) return; // skip malformed entries instead of crashing
-    const key = e.name.trim().toLowerCase();
-    if(!map[key]) map[key]={name:e.name.trim(),points:0,attempts:0,lastSeen:0};
-    map[key].name = e.name.trim(); // keep most-recent casing for display
-    map[key].points += e.points;
-    map[key].attempts += 1;
-    map[key].lastSeen = Math.max(map[key].lastSeen, e.createdAt||0);
-  });
+  // Each ninja is listed for their sign-in length (1/2/3h, set on Points)
+  // plus 20 minutes — window.cnPresenceFromEntries / cnAccessEndsAt.
+  const presenceRows = window.cnPresenceFromEntries(todayEntries, today);
   function isRevokedToday(key){
     const r = revocations && revocations[key];
     return !!(r && r.date === today);
@@ -312,11 +353,11 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
     const linked = findLinkedAccount(p.name, usernames);
     return linked ? isRevokedToday(window.cnKeySafe(linked)) : false;
   }
-  const allToday = Object.values(map);
+  const allToday = presenceRows;
   const present = allToday
-    .filter(p => p.lastSeen && (nowTick - p.lastSeen <= window.SESSION_MS) && !isRemoved(p))
+    .filter(p => p.lastSeen && nowTick < p.endsAt && !isRemoved(p))
     .sort((a,b)=>b.lastSeen-a.lastSeen);
-  const expiredCount = allToday.filter(p => !isRemoved(p) && !(p.lastSeen && (nowTick - p.lastSeen <= window.SESSION_MS))).length;
+  const expiredCount = allToday.filter(p => !isRemoved(p) && !(p.lastSeen && nowTick < p.endsAt)).length;
 
   // Per-ninja selected break length (minutes), used only when starting a break.
   // Defaults to the last preset picked; a custom number can override it too.
@@ -333,15 +374,18 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
   async function handleBreakToggle(account, currentlyOn){
     if(!account || togglingAccount) return;
     const durationMin = currentlyOn ? null : getBreakMinutes(account);
-    const pw = window.prompt(`Enter Sensei password to ${currentlyOn?"end":`start a ${durationMin}-minute`} break for ${account}:`);
-    if(pw===null) return;
-    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
+    const okPw = await window.cnDialog.password({
+      title: currentlyOn ? "⏹ End break" : "☕ Start break",
+      message: currentlyOn ? `End the break for ${account}?` : `Start a ${durationMin}-minute break for ${account}?`,
+      confirmLabel: currentlyOn ? "END BREAK" : "START BREAK"
+    });
+    if(!okPw) return;
     setTogglingAccount(account);
     try{
       await window.fbBreak.setBreak(window.cnKeySafe(account), !currentlyOn, currentlyOn ? undefined : durationMin*60*1000);
       if(!currentlyOn) setCustomBreakInputFor(account,"");
       await onBreakChanged();
-    } catch(e){ console.warn(e); alert("Something went wrong updating break status. Please try again."); }
+    } catch(e){ console.warn(e); window.cnDialog.alert("Something went wrong updating break status. Please try again."); }
     setTogglingAccount(null);
   }
 
@@ -349,18 +393,21 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
   async function handleEndSession(account){
     if(!account || endingAccount) return;
     if(!window.cnSession || typeof window.cnSession.endSession !== "function"){
-      alert("This site's shared.js is out of date and doesn't have the End Session feature yet — please update shared.js (and reload) and try again.");
+      window.cnDialog.alert("This site's shared.js is out of date and doesn't have the End Session feature yet — please update shared.js (and reload) and try again.");
       return;
     }
-    if(!window.confirm(`End ${account}'s session immediately? They'll be signed out right away (even mid-page) and won't be able to log back in until you press "Unlock Session".`)) return;
-    const pw = window.prompt(`Enter Sensei password to end the session for ${account}:`);
-    if(pw===null) return;
-    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
+    const okPw = await window.cnDialog.password({
+      title: "⛔ End session",
+      message: `End ${account}'s session immediately? They'll be signed out right away (even mid-page) and won't be able to log back in until you press "Unlock Session".`,
+      confirmLabel: "END SESSION", danger: true
+    });
+    if(!okPw) return;
     setEndingAccount(account);
     try{
       await window.cnSession.endSession(window.cnKeySafe(account));
+      try{ await window.fbGoals.clearGoal(window.cnKeySafe(account)); }catch(e){}
       await onRefresh();
-    } catch(e){ console.warn(e); alert("Something went wrong ending the session: "+(e&&e.message?e.message:e)); }
+    } catch(e){ console.warn(e); window.cnDialog.alert("Something went wrong ending the session: "+(e&&e.message?e.message:e)); }
     setEndingAccount(null);
   }
 
@@ -368,17 +415,20 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
   async function handleUnlockSession(account){
     if(!account || unlockingAccount) return;
     if(!window.cnSession || typeof window.cnSession.unlockSession !== "function"){
-      alert("This site's shared.js is out of date and doesn't have the Unlock Session feature yet — please update shared.js (and reload) and try again.");
+      window.cnDialog.alert("This site's shared.js is out of date and doesn't have the Unlock Session feature yet — please update shared.js (and reload) and try again.");
       return;
     }
-    const pw = window.prompt(`Enter Sensei password to unlock ${account}'s account:`);
-    if(pw===null) return;
-    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
+    const okPw = await window.cnDialog.password({
+      title: "🔓 Unlock session",
+      message: `Unlock ${account}'s account so they can log back in?`,
+      confirmLabel: "UNLOCK"
+    });
+    if(!okPw) return;
     setUnlockingAccount(account);
     try{
       await window.cnSession.unlockSession(window.cnKeySafe(account));
       await onRefresh();
-    } catch(e){ console.warn(e); alert("Something went wrong unlocking the session: "+(e&&e.message?e.message:e)); }
+    } catch(e){ console.warn(e); window.cnDialog.alert("Something went wrong unlocking the session: "+(e&&e.message?e.message:e)); }
     setUnlockingAccount(null);
   }
 
@@ -391,25 +441,29 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
   async function handleRemove(p, account){
     if(removingKey) return;
     if(!window.fbAccessRevocation || typeof window.fbAccessRevocation.revoke !== "function"){
-      alert("This site's shared.js is out of date and doesn't have the Remove from Dojo feature yet — please update shared.js (and reload) and try again.");
+      window.cnDialog.alert("This site's shared.js is out of date and doesn't have the Remove from Dojo feature yet — please update shared.js (and reload) and try again.");
       return;
     }
-    if(!window.confirm(`Remove ${p.name} from the dojo? They'll disappear from this list and can't log back in today — even if their 2-hour window hasn't closed yet.`)) return;
-    const pw = window.prompt(`Enter Sensei password to remove ${p.name}:`);
-    if(pw===null) return;
-    if(pw!==window.CN_ADMIN_PASS){ alert("Incorrect password."); return; }
+    const okPw = await window.cnDialog.password({
+      title: "🚪 Remove from dojo",
+      message: `Remove ${p.name} from the dojo? They'll disappear from this list and can't log back in today — even if their 2-hour window hasn't closed yet.`,
+      confirmLabel: "REMOVE", danger: true
+    });
+    if(!okPw) return;
     const nameKey = window.cnKeySafe(p.name);
     setRemovingKey(nameKey);
     try{
       await window.fbAccessRevocation.revoke(nameKey);
       await window.cnSession.forceLogoutKey(nameKey);
+      try{ await window.fbGoals.clearGoal(nameKey); }catch(e){}
       if(account){
         const acctKey = window.cnKeySafe(account);
         await window.fbAccessRevocation.revoke(acctKey);
         await window.cnSession.forceLogoutKey(acctKey);
+        try{ await window.fbGoals.clearGoal(acctKey); }catch(e){}
       }
       await onRefresh();
-    } catch(e){ console.warn(e); alert("Something went wrong removing them: "+(e&&e.message?e.message:e)); }
+    } catch(e){ console.warn(e); window.cnDialog.alert("Something went wrong removing them: "+(e&&e.message?e.message:e)); }
     setRemovingKey(null);
   }
 
@@ -441,8 +495,8 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
         </button>
       </div>
       <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:24}}>
-        {todayLabel()} · Ninjas with a Points entry logged in the last {window.SESSION_HOURS} hours
-        {expiredCount>0?` · ${expiredCount} more checked in earlier today but their ${window.SESSION_HOURS}h window has closed`:""}
+        {todayLabel()} · Ninjas still within their sign-in time (1–3h + {window.SESSION_GRACE_MIN} min)
+        {expiredCount>0?` · ${expiredCount} more checked in earlier today but their sign-in time has ended`:""}
       </p>
 
       <Glass style={{padding:"16px 20px",marginBottom:24,borderColor:"#00cfff33",background:"rgba(0,207,255,0.05)"}}>
@@ -458,7 +512,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
       {present.length===0?(
         <Glass style={{padding:40,textAlign:"center"}}>
           <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:15}}>
-            No ninjas currently checked in. Once a Sensei enters someone into Points, they'll show up here for {window.SESSION_HOURS} hours! 🥷
+            No ninjas currently checked in. Once a Sensei enters someone into Points, they'll show up here for their sign-in time + {window.SESSION_GRACE_MIN} min! 🥷
           </p>
         </Glass>
       ):(
@@ -468,7 +522,7 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
             const breakEntry = account ? breakStatuses[window.cnKeySafe(account)] : null;
             const onBreak = window.cnIsBreakActive(breakEntry);
             const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.cnBreakDurationMs(breakEntry)-nowTick)/60000)) : 0;
-            const accessRemainingMs = Math.max(0,(p.lastSeen+window.SESSION_MS)-nowTick);
+            const accessRemainingMs = Math.max(0,p.endsAt-nowTick);
             const accessRemainingMin = Math.ceil(accessRemainingMs/60000);
             const locked = account ? !!(locks && locks[window.cnKeySafe(account)]) : false;
             return(

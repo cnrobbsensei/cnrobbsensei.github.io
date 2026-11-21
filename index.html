@@ -37,6 +37,8 @@ select option{background:#0a0a0f;color:#fff;}
 <body>
 <div id="root"></div>
 <script src="shared.js"></script>
+<script src="codebot.js"></script>
+<script src="codebot-ai.js"></script>
 <script type="text/babel">
 const {useState,useEffect} = React;
 
@@ -205,7 +207,7 @@ function LoginScreen({onLogin}){
             👀 Continue as Guest (View Only)
           </button>
           <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.2)",textAlign:"center",marginTop:16,lineHeight:1.6}}>
-            Students: you must be entered into Points today, within the last {window.SESSION_HOURS} hours, to log in.<br/>
+            Students: you must be entered into Points today, and still within your sign-in time (1–3 hours + {window.SESSION_GRACE_MIN} min), to log in.<br/>
             Sensei: enter the Sensei password. Multiple Senseis may be signed in at once; ninjas get one device at a time.<br/>
             📘 The dashboard walkthrough is available once you're signed in.
           </p>

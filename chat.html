@@ -31,6 +31,8 @@ select option{background:#0a0a0f;color:#fff;}
 <body>
 <div id="root"></div>
 <script src="shared.js"></script>
+<script src="codebot.js"></script>
+<script src="codebot-ai.js"></script>
 <script>
 // Ninja Chat data layer. Messages are stored flat under "chat/messages" and
 // streamed live. Profanity-filtered client-side in shared.js (cnContainsBadWords)
@@ -196,8 +198,8 @@ function timeLabel(ts){
 
 function ChatBubble({msg,isMe,isAdmin,isGuest,onDelete}){
   const [hover,setHover]=useState(false);
-  const roleColor = msg.role==="admin" ? "#39ff14" : msg.role==="student" ? "#ffd700" : "#00cfff";
-  const canLink = msg.role!=="admin" && !isGuest;
+  const roleColor = msg.role==="admin" ? "#39ff14" : msg.role==="bot" ? "#b388ff" : msg.role==="student" ? "#ffd700" : "#00cfff";
+  const canLink = msg.role!=="admin" && msg.role!=="bot" && !isGuest;
   return(
     <div onMouseEnter={()=>setHover(true)} onMouseLeave={()=>setHover(false)}
       style={{display:"flex",flexDirection:"column",alignItems:isMe?"flex-end":"flex-start",marginBottom:14,animation:"bubbleIn .25s ease both"}}>
@@ -205,7 +207,7 @@ function ChatBubble({msg,isMe,isAdmin,isGuest,onDelete}){
         <span onClick={()=>{ if(canLink) window.location.href=window.cnProfileHref(msg.senderName); }}
           style={{fontFamily:"'Fira Code',monospace",fontSize:10,fontWeight:700,color:roleColor,
           cursor:canLink?"pointer":"default",textDecoration:canLink?"underline":"none"}}>
-          {msg.role==="admin" ? "🔐 Sensei" : msg.senderName}
+          {msg.role==="admin" ? "🔐 Sensei" : msg.role==="bot" ? "🤖 CodeBot" : msg.senderName}
         </span>
         <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.25)"}}>{timeLabel(msg.ts)}</span>
         {isAdmin && hover && (
@@ -250,11 +252,25 @@ function ChatTab({auth,isAdmin,isStudent,isGuest,setToast}){
       setToast({msg:`Messages must be under ${CHAT_MAX_LEN} characters.`,color:"#ff2d78"});
       return;
     }
-    if(window.cnContainsBadWords(text)){
-      setToast({msg:"⚠️ That message contains language that isn't allowed in Ninja Chat. Please rephrase.",color:"#ff2d78"});
-      return;
-    }
     setSending(true);
+    // Every ninja message goes through CodeBot first; only clean ones are sent.
+    if(!isAdmin){
+      let verdict;
+      try{
+        verdict = window.cnCodeBot
+          ? await window.cnCodeBot.moderateAsync(text)   // word rules + local AI model (when loaded)
+          : (window.cnContainsBadWords(text) ? {ok:false,category:"profanity",reason:"That has language that isn't allowed here."} : {ok:true});
+      }catch(e){ console.warn(e); verdict = window.cnCodeBot ? window.cnCodeBot.moderate(text) : {ok:true}; }
+      if(!verdict.ok){
+        setSending(false);
+        setToast({msg:`🤖 CodeBot blocked that message — ${verdict.reason}`,color:"#ff2d78"});
+        try{
+          if(window.cnCodeBot) await window.cnCodeBot.logModeration({source:"chat",status:"blocked",username:senderName,
+            accountKey:auth.accountKey||window.cnKeySafe(senderName),text:text.slice(0,300),category:verdict.category});
+        }catch(e){ console.warn(e); }
+        return;
+      }
+    }
     try{
       await window.fbChat.send(senderName, isAdmin?"admin":"student", text);
       setDraft("");
@@ -278,7 +294,7 @@ function ChatTab({auth,isAdmin,isStudent,isGuest,setToast}){
         </div>
         <h1 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(18px,2.6vw,28px)",fontWeight:900,marginBottom:6}}>Ninja Chat</h1>
         <p style={{fontFamily:"'Exo 2',sans-serif",fontSize:12.5,color:"rgba(255,255,255,0.45)"}}>
-          A friendly space for ninjas to chat. Be kind — inappropriate messages are automatically blocked, and Senseis can remove any message.
+          A friendly space for ninjas to chat. Be kind — 🤖 CodeBot checks every message before it sends and blocks anything inappropriate, and Senseis can remove any message.
         </p>
       </div>
 
@@ -295,7 +311,7 @@ function ChatTab({auth,isAdmin,isStudent,isGuest,setToast}){
             </div>
           ):(
             <>
-              {messages.map(m=>(
+              {messages.filter(m=>m.role==="admin"||m.role==="bot"||!window.cnCodeBot||window.cnCodeBot.moderate(m.text).ok).map(m=>(
                 <ChatBubble key={m.id} msg={m} isAdmin={isAdmin} isGuest={isGuest}
                   isMe={isAdmin ? m.role==="admin" : (m.senderName===senderName && m.role!=="admin")}
                   onDelete={handleDelete}/>
@@ -321,7 +337,7 @@ function ChatTab({auth,isAdmin,isStudent,isGuest,setToast}){
                 background:(sending||!draft.trim())?"rgba(255,255,255,0.08)":"linear-gradient(135deg,#39ff14,#00cfff)",
                 color:(sending||!draft.trim())?"rgba(255,255,255,0.3)":"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,
                 display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                {sending?<Spinner/>:"SEND ⚡"}
+                {sending?<><Spinner/> 🤖</>:"SEND ⚡"}
               </button>
             </div>
           ):(

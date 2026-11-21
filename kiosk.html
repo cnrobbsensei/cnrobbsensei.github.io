@@ -30,6 +30,8 @@ html,body{height:100%;background:#f4f6f9;color:#14161a;overflow:hidden;}
 <body>
 <div id="root"></div>
 <script src="shared.js"></script>
+<script src="codebot.js"></script>
+<script src="codebot-ai.js"></script>
 <script type="text/babel">
 const {useState,useEffect,useMemo} = React;
 
@@ -255,11 +257,25 @@ async function speak(text, audioEl, onError){
 
 }
 
+// "No goal set" reminder — spoken every 3 minutes while anyone signed in
+// still has no goal for today.
+const GOAL_REMINDER_MS = 3*60*1000;
+function spokenName(account){
+  const first = String(account||"").split(".")[0].trim();
+  return first ? first.charAt(0).toUpperCase() + first.slice(1) : "A ninja";
+}
+function noGoalMessage(list){
+  return list.length === 1
+    ? `${spokenName(list[0])} does not have a goal set.`
+    : `${list.length} ninjas do not have a goal set.`;
+}
+
 function KioskApp(){
   const [goals,setGoals]=useState(null);
   const [breaks,setBreaks]=useState({});
   const [allEntries,setAllEntries]=useState([]);
   const [usernames,setUsernames]=useState([]);
+  const [revocations,setRevocations]=useState({});
   const [nowTick,setNowTick]=useState(Date.now());
   const [soundEnabled,setSoundEnabled]=useState(
   localStorage.getItem("kioskSound") === "true"
@@ -291,25 +307,57 @@ function KioskApp(){
   // Which accounts are currently within their 2-hour Points access window —
   // the exact same rule that drives "In The Dojo" and student login, so a
   // ninja whose access has expired disappears from the kiosk automatically.
-  const presentAccountKeys = useMemo(()=>{
+  useEffect(()=>{
+    if(!window.fbAccessRevocation || !window.fbAccessRevocation.listen) return;
+    return window.fbAccessRevocation.listen(setRevocations);
+  },[]);
+
+  // Signed-in ninjas with a linked account (goals are set per account),
+  // as {key, name}. Same sign-in rule as login / In The Dojo:
+  // sign-in hours + 20 min, minus anyone removed today.
+  const presentAccounts = useMemo(()=>{
     const today = window.todayStr();
-    const map = {};
-    (allEntries||[]).filter(e=>e && e.date===today).forEach(e=>{
-      if(!e.name) return;
-      const key = e.name.trim().toLowerCase();
-      if(!map[key]) map[key]={name:e.name.trim(),lastSeen:0};
-      map[key].name = e.name.trim();
-      map[key].lastSeen = Math.max(map[key].lastSeen, e.createdAt||0);
-    });
-    const keys = new Set();
-    Object.values(map)
-      .filter(p=>p.lastSeen && (nowTick-p.lastSeen<=window.SESSION_MS))
+    const out = new Map();
+    window.cnPresenceFromEntries(allEntries||[], today)
+      .filter(p=>p.lastSeen && nowTick < p.endsAt)
       .forEach(p=>{
         const account = window.findLinkedAccount(p.name, usernames);
-        if(account) keys.add(window.cnKeySafe(account));
+        if(!account) return;
+        const key = window.cnKeySafe(account);
+        const rv = revocations[key] || revocations[window.cnKeySafe(p.name)];
+        if(rv && rv.date === today) return;
+        out.set(key, account);
       });
-    return keys;
-  },[allEntries,usernames,nowTick]);
+    return out;
+  },[allEntries,usernames,revocations,nowTick]);
+  const presentAccountKeys = useMemo(()=>new Set(presentAccounts.keys()),[presentAccounts]);
+
+  // Signed-in ninjas who don't have a goal for today yet (goals are cleared
+  // at each new sign-in, so this is everyone a Sensei still needs to assign).
+  const noGoal = useMemo(()=>{
+    if(goals===null) return [];
+    const list = [];
+    presentAccounts.forEach((account,key)=>{
+      const g = goals[key];
+      if(g && g.goal) return;
+      list.push(account);
+    });
+    return list.sort();
+  },[presentAccounts,goals]);
+
+  // Every 3 minutes, remind the room (via ElevenLabs) if anyone still has no
+  // goal set. Uses a ref so the 3-minute timer isn't reset by the 1-second clock.
+  const noGoalRef = React.useRef(noGoal);
+  noGoalRef.current = noGoal;
+  useEffect(()=>{
+    if(!soundEnabled) return;
+    const iv = setInterval(()=>{
+      const list = noGoalRef.current;
+      if(!list.length) return;
+      speak(noGoalMessage(list), audioElRef.current, setTtsError);
+    }, GOAL_REMINDER_MS);
+    return ()=>clearInterval(iv);
+  },[soundEnabled]);
 
   const bySection = useMemo(()=>{
     const map = {}; window.CN_SECTIONS.forEach(s=>map[s]=[]);
@@ -399,6 +447,17 @@ function KioskApp(){
         )}
         <div style={{marginLeft:"auto"}}><Clock/></div>
       </div>
+
+      {noGoal.length>0 && (
+        <div style={{
+          marginBottom:10,padding:"6px 12px",borderRadius:8,flexShrink:0,
+          background:"rgba(201,106,0,0.1)",border:"1px solid rgba(201,106,0,0.35)",
+          fontFamily:"'Fira Code',monospace",fontSize:11,color:"#c96a00",
+        }}>
+          🎯 {noGoal.length===1?"1 ninja does":`${noGoal.length} ninjas do`} not have a goal set: {noGoal.map(spokenName).join(", ")}
+          {soundEnabled?" · reminder announced every 3 min":" · turn on announcements for spoken reminders"}
+        </div>
+      )}
 
       {ttsError && (
         <div style={{

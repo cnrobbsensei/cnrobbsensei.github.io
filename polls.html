@@ -30,6 +30,8 @@ select option{background:#0a0a0f;color:#fff;}
 <body>
 <div id="root"></div>
 <script src="shared.js"></script>
+<script src="codebot.js"></script>
+<script src="codebot-ai.js"></script>
 <script>
 function sanitizeFirebaseKey(str){
   return String(str).trim().replace(/[.#$\[\]\/]/g, "_");
@@ -49,15 +51,33 @@ window.fbPolls = {
         status:p.status||"pending", // pending | approved | archived
         createdBy:p.createdBy||"Unknown",
         ts:p.ts||0,
+        approvedBy:p.approvedBy||null,
+        modFlag:p.modFlag||null,
         votes:voteList
       });
     }
     return polls;
   },
+  // CodeBot reviews every new poll on the spot: clean -> live immediately,
+  // flagged -> stays in Pending with the reason for a Sensei to decide.
   async createPoll(title,options,createdBy){
     const ref = window.cnDb.ref("polls").push();
-    await ref.set({title,options,status:"pending",createdBy,ts:Date.now()});
-    return {id:ref.key};
+    let verdict = null;
+    try{ verdict = window.cnCodeBot ? await window.cnCodeBot.moderatePollAsync(title,options) : null; }
+    catch(e){ console.warn(e); verdict = window.cnCodeBot ? window.cnCodeBot.moderatePoll(title,options) : null; }
+    const data = {title,options,status:"pending",createdBy,ts:Date.now()};
+    if(verdict){
+      data.modCheckedAt = Date.now();
+      if(window.cnCodeBotAI && window.cnCodeBotAI.moderationReady()) data.aiCheckedAt = Date.now();
+      if(verdict.ok){ data.status = "approved"; data.approvedBy = "codebot"; }
+      else data.modFlag = {category:verdict.category, reason:verdict.reason, field:verdict.field||null};
+    }
+    await ref.set(data);
+    if(verdict && !verdict.ok){
+      try{ await window.cnCodeBot.logModeration({source:"poll",status:"held",username:createdBy,accountKey:window.cnKeySafe(createdBy),
+        text:title,category:verdict.category,pollId:ref.key},"poll_"+ref.key); }catch(e){ console.warn(e); }
+    }
+    return {id:ref.key, status:data.status, modFlag:data.modFlag||null, approvedBy:data.approvedBy||null};
   },
   async setStatus(pollId,status){
     await window.cnDb.ref(`polls/${pollId}`).update({status});
@@ -246,9 +266,12 @@ function PollsTab({isAdmin,isStudent,studentUsername,pollsData,setPollsData,setT
     try{
       const creator = isStudent ? studentUsername : (isAdmin ? "Sensei" : "Unknown");
       const result = await window.fbPolls.createPoll(title.trim(),filled,creator);
-      setPollsData(prev=>[...prev,{id:result.id,title:title.trim(),options:filled,status:"pending",createdBy:creator,ts:Date.now(),votes:[]}]);
+      setPollsData(prev=>[...prev,{id:result.id,title:title.trim(),options:filled,status:result.status||"pending",createdBy:creator,ts:Date.now(),votes:[],
+        approvedBy:result.approvedBy,modFlag:result.modFlag}]);
       setTitle("");setOptions(["",""]);setView("results");
-      setToast({msg:"Poll sent for admin approval! 📊",color:"#00cfff"});
+      if(result.status==="approved") setToast({msg:"🤖 CodeBot checked your poll — it's live now! 📊",color:"#39ff14"});
+      else if(result.modFlag) setToast({msg:`🤖 CodeBot held your poll for a Sensei to review — ${result.modFlag.reason}`,color:"#ffd700"});
+      else setToast({msg:"Poll sent for admin approval! 📊",color:"#00cfff"});
     } catch(e){setToast({msg:`Failed: ${e.message}`,color:"#ff2d78"});}
     setSaving(false);
   }
@@ -337,7 +360,7 @@ function PollsTab({isAdmin,isStudent,studentUsername,pollsData,setPollsData,setT
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:8,flexWrap:"wrap"}}>
           <h3 style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:15,color:"#fff",margin:0}}>📊 {poll.title}</h3>
           <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-            <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",whiteSpace:"nowrap"}}>by {poll.createdBy} · {total} vote{total!==1?"s":""}</span>
+            <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",whiteSpace:"nowrap"}}>by {poll.createdBy} · {total} vote{total!==1?"s":""}{poll.approvedBy==="codebot"?" · 🤖 approved":""}</span>
             {isAdmin&&(
               <div style={{display:"flex",gap:6}}>
                 <button onClick={()=>archivePoll(poll.id)} disabled={actionId===poll.id}
@@ -505,6 +528,12 @@ function PollsTab({isAdmin,isStudent,studentUsername,pollsData,setPollsData,setT
                   <h3 style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:15,color:"#fff",margin:0}}>{poll.title}</h3>
                   <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,215,0,0.5)"}}>by {poll.createdBy}</span>
                 </div>
+                {poll.modFlag&&(
+                  <div style={{marginBottom:12,padding:"8px 12px",borderRadius:8,background:"rgba(255,45,120,0.08)",border:"1px solid #ff2d7844",
+                    fontFamily:"'Fira Code',monospace",fontSize:10,color:"#ff2d78",lineHeight:1.5}}>
+                    🤖 CodeBot held this poll ({poll.modFlag.field==="option"?"an option":"the title"}): {poll.modFlag.reason}
+                  </div>
+                )}
                 <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:18}}>
                   {poll.options.map((opt,oi)=>(
                     <div key={oi} style={{padding:"9px 14px",borderRadius:8,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",

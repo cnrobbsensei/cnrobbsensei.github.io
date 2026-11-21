@@ -30,6 +30,8 @@ select option{background:#0a0a0f;color:#fff;}
 <body>
 <div id="root"></div>
 <script src="shared.js"></script>
+<script src="codebot.js"></script>
+<script src="codebot-ai.js"></script>
 <script>
 window.fbRiddles = {
   async getAll(){
@@ -44,7 +46,7 @@ window.fbRiddles = {
       for(const [id,sub] of Object.entries(subs)){
         entries.push({id,...sub});
       }
-      map[wNum] = {text:wData.text||"",answer:wData.answer||"",revealed:wData.revealed||false,winner:wData.winner||null,locked:wData.locked||false,entries};
+      map[wNum] = {text:wData.text||"",answer:wData.answer||"",answerAlts:wData.answerAlts||[],byCodeBot:!!wData.byCodeBot,revealed:wData.revealed||false,winner:wData.winner||null,locked:wData.locked||false,entries};
     }
     return map;
   },
@@ -230,8 +232,11 @@ function RiddleTab({setToast,isAdmin,isStudent,isGuest,studentUsername,riddleMap
   const isLocked = weekData.locked;
   const canSubmit = isCurrentWeek && (isAdmin || isStudent);
 
+  // Same matching rule CodeBot uses (window.cnCodeBot.answerMatches) so the
+  // ✓ CORRECT badges always agree with the winner CodeBot picks.
   function isCorrect(submitted, official){
     if(!official || !gradingActive) return false;
+    if(window.cnCodeBot) return window.cnCodeBot.answerMatches(submitted, official, weekData.answerAlts||[]);
     return submitted.trim().toLowerCase().includes(official.trim().toLowerCase());
   }
 
@@ -273,7 +278,10 @@ function RiddleTab({setToast,isAdmin,isStudent,isGuest,studentUsername,riddleMap
     setSaving(true);
     try{
       await window.fbRiddles.setRiddle(week,newRiddleText.trim(),"");
-      setRiddleMap(prev=>({...prev,[week]:{...weekData,text:newRiddleText.trim(),answer:"",revealed:false}}));
+      // A hand-edited riddle is no longer CodeBot's — it will ask a Sensei
+      // for the answer (or use the one revealed here) when grading.
+      await window.cnDb.ref(`riddles/week_${week}`).update({byCodeBot:false});
+      setRiddleMap(prev=>({...prev,[week]:{...weekData,text:newRiddleText.trim(),answer:"",revealed:false,byCodeBot:false}}));
       setEditMode(false);
       setToast({msg:"Riddle saved! Reveal the answer at end of week. ✏️",color:"#39ff14"});
     } catch(e){setToast({msg:`Save failed: ${e.message}`,color:"#ff2d78"});}
@@ -440,7 +448,7 @@ function RiddleTab({setToast,isAdmin,isStudent,isGuest,studentUsername,riddleMap
       <Glass style={{padding:24,marginBottom:24,borderColor:"#ff2d7833",boxShadow:"0 0 40px #ff2d7822,0 8px 32px rgba(0,0,0,0.4)",position:"relative",overflow:"hidden"}}>
         <div style={{position:"absolute",top:0,left:0,right:0,height:3,background:"linear-gradient(90deg,#ff2d78,#00cfff,#39ff14)"}}/>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:8,flexWrap:"wrap"}}>
-          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>RIDDLE #{week}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>RIDDLE #{week}{weekData.byCodeBot?" · 🤖 set by CodeBot":""}</span>
           {isAdmin&&!isLocked&&(
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               <button onClick={()=>{setEditMode(!editMode);setRevealMode(false);setNewRiddleText(weekData.text);}}
