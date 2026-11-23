@@ -367,7 +367,6 @@
     if(engineBusy) return;
     engineBusy = true;
     try{
-      try{ await sweepGoals(); }catch(e){ console.warn("CodeBot goal sweep failed:", e); }
       const fin = await finalizePastWeeks();
       await ensureCurrentRiddle();
       const needs = fin.filter(r => r.status === "needs_answer").map(r => r.week);
@@ -741,8 +740,6 @@
     if(todays.length >= MAX_ATTEMPTS) return {ok:false, msg:`${norm} already has ${todays.length}/${MAX_ATTEMPTS} entries today — no more attempts allowed.`};
     // Login window is locked by the first entry of the day (same as Points tab).
     let useHours = window.cnCleanHours(hours || window.SESSION_HOURS), lockedNote = "";
-    // First entry today = a new sign-in: they start with no goal.
-    if(!todays.length && window.cnResetGoalOnSignIn){ try{ await window.cnResetGoalOnSignIn(norm); }catch(e){} }
     let first = null;
     if(todays.length){
       first = window.cnFirstEntryOfDay(todays) || todays[0];
@@ -759,7 +756,7 @@
     const endsLabel = new Date(endsAt).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
     const timeNote = first
       ? `Sign-in time unchanged — still ends at ${endsLabel}.`
-      : `Signed in for ${useHours}h (+${window.SESSION_GRACE_MIN||20} min), until ${endsLabel}. They have no goal yet — assign one on In The Dojo.`;
+      : `Signed in for ${useHours}h (+${window.SESSION_GRACE_MIN||20} min), until ${endsLabel}. Check their goal on In The Dojo (keep it or change it).`;
     return {ok:true, msg:`✅ Added **${points} pts** to **${norm}** for today${lockedNote}. ${left} attempt${left===1?"":"s"} left today. ${timeNote} (Say **undo** to take it back.)`};
   }
 
@@ -779,6 +776,8 @@
     "• undo  /  remove last entry for Maya",
     "• who's here  — everyone signed in, time left and their goal",
     "• goals  — today's goals and who still needs one",
+    "• site time  — who's actively on this site and for how long",
+    "• site time limit 15  /  site time limit off  — when the kiosk says \"get back to work\"",
     "**Riddle**",
     "• riddle  — this week's riddle, answer and how many got it",
     "• submissions",
@@ -871,21 +870,12 @@
     return out;
   }
 
-  // Goals last for one visit: delete any goal that isn't from today or whose
-  // ninja's sign-in time (+20 min) is over / who was removed from the dojo.
-  async function sweepGoals(){
-    const raw = (await db.ref("goals").once("value")).val() || {};
-    if(!Object.keys(raw).length) return 0;
-    const today = window.todayStr();
-    const presentKeys = new Set();
-    for(const p of await presentNinjas()) p.keys.forEach(k => presentKeys.add(k));
-    let removed = 0;
-    for(const [k, g] of Object.entries(raw)){
-      if(!g || g.date !== today || !presentKeys.has(k)){
-        await db.ref(`goals/${k}`).remove(); removed++;
-      }
-    }
-    return removed;
+  // Goal line for one present ninja: saved goal + whether it's checked today.
+  function goalLine(p, goals){
+    const g = p.keys.map(k => goals[k]).find(x => x && x.goal);
+    if(!g) return {g:null, text:"no goal yet", ok:false};
+    const ok = window.cnGoalActive(g);
+    return {g, ok, text: g.goal + (ok ? "" : ` (needs check — last set ${g.date||"earlier"})`)};
   }
 
   async function whoIsHere(){
@@ -898,22 +888,25 @@
       const mins = Math.max(0, Math.round((p.endsAt - now)/60000));
       const key = p.keys[p.keys.length-1];
       const br = window.cnIsBreakActive(breaks[key]) ? " · ☕ on break" : "";
-      const g = p.keys.map(k => goals[k]).find(Boolean);
-      return `• ${p.linked || p.name} — ${p.hours}h sign-in, ${mins} min left${br}\n   🎯 ${g ? g.goal : "no goal yet"}`;
+      return `• ${p.linked || p.name} — ${p.hours}h sign-in, ${mins} min left${br}\n   🎯 ${goalLine(p, goals).text}`;
     }).join("\n");
   }
 
   async function goalsReport(){
     const here = await presentNinjas();
-    if(!here.length) return "Nobody is signed in, so there are no goals right now.";
+    if(!here.length) return "Nobody is signed in right now. (Every ninja's saved project is on the **Ninjas** tab.)";
     const goals = await window.fbGoals.getAll();
-    const withGoal = [], without = [];
+    const ok = [], check = [], none = [];
     for(const p of here){
-      const g = p.keys.map(k => goals[k]).find(Boolean);
-      (g ? withGoal : without).push(g ? `• **${p.linked || p.name}** (${g.section}) — ${g.goal}` : (p.linked || p.name));
+      const n = p.linked || p.name, gl = goalLine(p, goals);
+      if(!gl.g) none.push(n);
+      else if(gl.ok) ok.push(`• **${n}** (${gl.g.section}) — ${gl.g.goal}`);
+      else check.push(`• **${n}** — last goal: ${gl.g.goal}`);
     }
-    return `🎯 **Goals for today's ninjas**\n` + (withGoal.length ? withGoal.join("\n") : "• none assigned yet") +
-      (without.length ? `\n⚠️ **No goal yet:** ${without.join(", ")} — assign one on In The Dojo.` : "\n✅ Everyone has a goal.");
+    return `🎯 **Goals for today's ninjas**\n` + (ok.length ? ok.join("\n") : "• none checked yet today") +
+      (check.length ? `\n⏳ **Needs a check** (keep or change on In The Dojo):\n${check.join("\n")}` : "") +
+      (none.length ? `\n⚠️ **No goal yet:** ${none.join(", ")} — assign one on In The Dojo or the Ninjas tab.` : "") +
+      (!check.length && !none.length ? "\n✅ Everyone's goal is set for today." : "");
   }
 
   async function riddleReport(week){
@@ -1209,6 +1202,28 @@
         "\nI can **rename**, **remove last entry for ...**, or **undo** to fix these.";
     }
 
+    // ── Time actively on this site ("get back to work" kiosk reminder) ──
+    let st = lower.match(/^(?:set\s+)?site\s*time\s*limit\s*(?:to\s*)?(\d+|off)\b/);
+    if(st){
+      if(!window.fbActiveSessions) return "This page doesn't have the site-time feature loaded.";
+      const min = st[1] === "off" ? 0 : Math.min(240, parseInt(st[1],10));
+      await window.fbActiveSessions.setLimit(min);
+      logAction(`Site time limit set to ${min || "off"}.`);
+      return min ? `⏱️ Done — the kiosk will tell a ninja to get back to work after **${min} min** actively on the site (break time doesn't count).`
+                 : "⏱️ The \"get back to work\" reminder is **off**.";
+    }
+    if(/^(site time|who'?s on the site|who is on the site|time on (the )?site|screen time)\b/.test(lower)){
+      const sessions = (await db.ref("activeSessions").once("value")).val() || {};
+      const limRaw = (await db.ref("codebot/settings/siteTimeLimitMin").once("value")).val();
+      const limit = limRaw === null || limRaw === undefined ? (window.CN_SITE_TIME_LIMIT_MIN||15) : Number(limRaw)||0;
+      const rows = Object.entries(sessions).filter(([k,v]) => !k.startsWith("admin_") && window.cnSiteStreakMin(v) > 0)
+        .map(([k,v]) => ({k, m: Math.floor(window.cnSiteStreakMin(v))})).sort((a,b)=>b.m-a.m);
+      const head = `💻 **On the site right now** (limit: ${limit ? limit + " min" : "off"})`;
+      if(!rows.length) return head + "\nNobody is actively on the site.";
+      return head + "\n" + rows.map(r => `• ${r.k.replace(/_/g,".")} — ${r.m} min${limit && r.m >= limit ? " ⚠️ over the limit" : ""}`).join("\n") +
+        "\nChange it with **site time limit 10** (or **off**).";
+    }
+
     // ── Present ──
     if(/(who'?s here|who is here|in the dojo|checked in|present)/.test(lower)) return whoIsHere();
     if(/^(goals?|today'?s goals|who needs a goal|missing goals)\b/.test(lower)) return goalsReport();
@@ -1462,7 +1477,7 @@
   // -------------------------------------------------------------------------
   // Public API + boot
   // -------------------------------------------------------------------------
-  window.cnCodeBot = {answerMatches, runWeekly, sweepGoals, presentNinjas, handleCommand, finalizeWeek, ensureCurrentRiddle, auditPoints,
+  window.cnCodeBot = {answerMatches, runWeekly, presentNinjas, handleCommand, finalizeWeek, ensureCurrentRiddle, auditPoints,
     moderate, moderatePoll, moderateAsync, moderatePollAsync, logModeration, reviewPoll, fillRiddleQueue,
     _attachAI: api => attachAI(api)};
 

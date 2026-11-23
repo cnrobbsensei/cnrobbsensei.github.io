@@ -64,7 +64,7 @@ function Clock(){
 // A single ninja card. Sizing (font/padding) is driven entirely by CSS
 // vars set on the ancestor grid, so cards shrink/grow together as the
 // section's roster count changes — no per-card measurement needed.
-function NinjaCard({name,goal,onBreak,remainingMin,accent}){
+function NinjaCard({name,goal,needsCheck,onBreak,remainingMin,accent}){
   return(
     <div style={{
       position:"relative",
@@ -90,6 +90,9 @@ function NinjaCard({name,goal,onBreak,remainingMin,accent}){
           display:"-webkit-box",WebkitLineClamp:3,WebkitBoxOrient:"vertical",overflow:"hidden",
         }} title={goal}>
           🎯 {goal}
+          {needsCheck && (
+            <div style={{marginTop:3,fontSize:"calc(var(--goal-size,11px) - 1px)",color:"#c96a00"}}>⏳ needs a goal check today</div>
+          )}
         </div>
       ) : (
         <div style={{fontFamily:"'Fira Code',monospace",fontSize:"var(--goal-size,11px)",color:"rgba(20,22,26,0.35)"}}>
@@ -170,7 +173,7 @@ function SectionColumn({section,ninjas}){
             "--badge-size":`${s.badgeSize}px`,
           }}>
             {ninjas.map(nj=>(
-              <NinjaCard key={nj.key} name={nj.name} goal={nj.goal} onBreak={nj.onBreak} remainingMin={nj.remainingMin} accent={color}/>
+              <NinjaCard key={nj.key} name={nj.name} goal={nj.goal} needsCheck={nj.needsCheck} onBreak={nj.onBreak} remainingMin={nj.remainingMin} accent={color}/>
             ))}
           </div>
         )}
@@ -191,7 +194,13 @@ function SectionColumn({section,ninjas}){
 // later, gesture-less announcement is what keeps those from being
 // silently blocked. onError lets the UI show a visible message, since
 // a kiosk display has no console anyone will ever look at.
-async function speak(text, audioEl, onError){
+// Announcements are queued so two reminders never talk over each other.
+let speechQueue = Promise.resolve();
+function speak(text, audioEl, onError){
+  speechQueue = speechQueue.then(()=>speakNow(text, audioEl, onError)).catch(()=>{});
+  return speechQueue;
+}
+async function speakNow(text, audioEl, onError){
 
   try{
 
@@ -239,6 +248,8 @@ async function speak(text, audioEl, onError){
 
     try{
       await el.play();
+      // Wait for this clip to finish (max 20s) before the next one starts.
+      await new Promise(res=>{ el.onended=res; el.onerror=res; setTimeout(res,20000); });
     }catch(playErr){
       console.error("Audio playback blocked:", playErr);
       onError && onError(`Playback blocked by browser: ${playErr.message}. Tap "enable announcements" again.`);
@@ -270,12 +281,24 @@ function noGoalMessage(list){
     : `${list.length} ninjas do not have a goal set.`;
 }
 
+// "Get back to work" — a ninja actively using this site (not on a break)
+// for longer than the Sensei's limit (CodeBot: "site time limit N").
+const BACK_TO_WORK_REPEAT_MS = 3*60*1000;
+function backToWorkMessage(list){
+  const names = list.map(spokenName);
+  if(names.length === 1) return `${names[0]}, please get back to work.`;
+  if(names.length <= 3) return `${names.slice(0,-1).join(", ")} and ${names[names.length-1]}, please get back to work.`;
+  return `${names.length} ninjas, please get back to work.`;
+}
+
 function KioskApp(){
   const [goals,setGoals]=useState(null);
   const [breaks,setBreaks]=useState({});
   const [allEntries,setAllEntries]=useState([]);
   const [usernames,setUsernames]=useState([]);
   const [revocations,setRevocations]=useState({});
+  const [activeSessions,setActiveSessions]=useState({});
+  const [siteLimitMin,setSiteLimitMin]=useState(window.CN_SITE_TIME_LIMIT_MIN||15);
   const [nowTick,setNowTick]=useState(Date.now());
   const [soundEnabled,setSoundEnabled]=useState(
   localStorage.getItem("kioskSound") === "true"
@@ -332,14 +355,14 @@ function KioskApp(){
   },[allEntries,usernames,revocations,nowTick]);
   const presentAccountKeys = useMemo(()=>new Set(presentAccounts.keys()),[presentAccounts]);
 
-  // Signed-in ninjas who don't have a goal for today yet (goals are cleared
-  // at each new sign-in, so this is everyone a Sensei still needs to assign).
+  // Signed-in ninjas whose goal hasn't been set or checked TODAY. Goals are
+  // saved between visits, so on a new day everyone starts here until a
+  // Sensei keeps ("Still on this") or changes their goal.
   const noGoal = useMemo(()=>{
     if(goals===null) return [];
     const list = [];
     presentAccounts.forEach((account,key)=>{
-      const g = goals[key];
-      if(g && g.goal) return;
+      if(window.cnGoalActive(goals[key])) return;
       list.push(account);
     });
     return list.sort();
@@ -359,6 +382,47 @@ function KioskApp(){
     return ()=>clearInterval(iv);
   },[soundEnabled]);
 
+  useEffect(()=>{
+    if(!window.fbActiveSessions) return;
+    const u1 = window.fbActiveSessions.listen(setActiveSessions);
+    const u2 = window.fbActiveSessions.listenLimit(setSiteLimitMin);
+    return ()=>{ u1&&u1(); u2&&u2(); };
+  },[]);
+
+  // Ninjas who've been actively on the site longer than the limit.
+  const overTime = useMemo(()=>{
+    if(!siteLimitMin) return [];
+    const byKey = {}; (usernames||[]).forEach(u=>{ byKey[window.cnKeySafe(u)] = u; });
+    const list = [];
+    Object.entries(activeSessions||{}).forEach(([key,v])=>{
+      if(key.startsWith("admin_") || !v) return;
+      const mins = window.cnSiteStreakMin(v, nowTick);
+      if(mins >= siteLimitMin) list.push({key, name: byKey[key] || key, mins: Math.floor(mins)});
+    });
+    return list.sort((a,b)=>b.mins-a.mins);
+  },[activeSessions,usernames,siteLimitMin,nowTick]);
+
+  // Announce as soon as someone goes over, then every 3 minutes while
+  // anyone is still over (checked every 30s).
+  const overRef = React.useRef(overTime);
+  overRef.current = overTime;
+  useEffect(()=>{
+    if(!soundEnabled) return;
+    let lastSpoken = 0, lastKeys = "";
+    const check = ()=>{
+      const list = overRef.current;
+      if(!list.length){ lastKeys = ""; return; }
+      const keys = list.map(x=>x.key).sort().join(",");
+      const someoneNew = list.some(x=>!lastKeys.split(",").includes(x.key));
+      if(someoneNew || Date.now()-lastSpoken >= BACK_TO_WORK_REPEAT_MS){
+        speak(backToWorkMessage(list.map(x=>x.name)), audioElRef.current, setTtsError);
+        lastSpoken = Date.now(); lastKeys = keys;
+      }
+    };
+    const iv = setInterval(check, 30000);
+    return ()=>clearInterval(iv);
+  },[soundEnabled]);
+
   const bySection = useMemo(()=>{
     const map = {}; window.CN_SECTIONS.forEach(s=>map[s]=[]);
     Object.entries(goals||{}).forEach(([key,g])=>{
@@ -368,7 +432,8 @@ function KioskApp(){
       const breakEntry = breaks[key];
       const onBreak = window.cnIsBreakActive(breakEntry);
       const remainingMin = onBreak ? Math.max(1,Math.ceil((breakEntry.startedAt+window.cnBreakDurationMs(breakEntry)-nowTick)/60000)) : 0;
-      map[section].push({key,name:g.name,goal:(g.goal||"").trim(),onBreak,remainingMin});
+      // Saved goals stay between visits; ones not checked today are flagged.
+      map[section].push({key,name:g.name,goal:(g.goal||"").trim(),needsCheck:window.cnGoalNeedsCheck(g),onBreak,remainingMin});
     });
     Object.values(map).forEach(list=>list.sort((a,b)=>a.name.localeCompare(b.name)));
     return map;
@@ -447,6 +512,17 @@ function KioskApp(){
         )}
         <div style={{marginLeft:"auto"}}><Clock/></div>
       </div>
+
+      {overTime.length>0 && (
+        <div style={{
+          marginBottom:10,padding:"6px 12px",borderRadius:8,flexShrink:0,
+          background:"rgba(194,0,0,0.08)",border:"1px solid rgba(194,0,0,0.3)",
+          fontFamily:"'Fira Code',monospace",fontSize:11,color:"#c20000",
+        }}>
+          💻 Back to work, please: {overTime.map(x=>`${spokenName(x.name)} (${x.mins} min on the site)`).join(", ")}
+          {soundEnabled?"":" · turn on announcements for spoken reminders"}
+        </div>
+      )}
 
       {noGoal.length>0 && (
         <div style={{

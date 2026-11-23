@@ -412,6 +412,54 @@ function VoiceCheckInModal({match, onConfirm, onCancel}){
   );
 }
 
+// The ninja's saved goal / current project (same data as In The Dojo and the
+// Ninjas tab). On a new day it shows "needs check" until a Sensei keeps or
+// changes it — signing them in on Points is a natural moment to do that.
+function ProjectPanel({account,current}){
+  const [editing,setEditing]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const has=!!(current&&current.goal), checked=window.cnGoalActive(current);
+  const Picker=window.CnGoalPicker;
+  useEffect(()=>{ setEditing(false); },[account]);
+  async function keep(){
+    setBusy(true);
+    try{ await window.fbGoals.confirm(window.cnKeySafe(account)); }catch(e){ console.warn(e); }
+    setBusy(false);
+  }
+  return(
+    <div style={{marginTop:12,borderRadius:8,padding:"10px 12px",
+      background:checked?"rgba(0,207,255,0.06)":"rgba(255,215,0,0.07)",border:`1px solid ${checked?"#00cfff33":"#ffd70044"}`}}>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.35)",letterSpacing:1,marginBottom:6}}>
+        CURRENT PROJECT · {account}
+      </div>
+      {editing?(
+        <Picker account={account} current={current} onDone={()=>setEditing(false)}/>
+      ):(
+        <>
+          <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:12.5,color:has?"#fff":"#ffd700",marginBottom:4}}>
+            🎯 {has?current.goal:"No goal yet"}
+          </div>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:checked?"#39ff14":"#ffd700",marginBottom:8}}>
+            {checked?"✓ checked today":has?`⏳ needs a check today (last set ${current.date||"earlier"})`:"⏳ assign a goal"}
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            {has&&!checked&&(
+              <button onClick={keep} disabled={busy} style={{flex:1,padding:"7px",borderRadius:7,border:"1px solid #39ff1455",
+                background:"rgba(57,255,20,0.12)",color:"#39ff14",cursor:busy?"not-allowed":"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>
+                {busy?"…":"✓ Still on this"}
+              </button>
+            )}
+            <button onClick={()=>setEditing(true)} style={{flex:1,padding:"7px",borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",
+              background:"rgba(255,255,255,0.06)",color:"rgba(255,255,255,0.75)",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>
+              ✏ {has?"Change":"Assign goal"}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function EnterScores({allEntries,setAllEntries,setToast}){
   const [name,setName]=useState("");
   const [pts,setPts]=useState("");
@@ -437,6 +485,9 @@ function EnterScores({allEntries,setAllEntries,setToast}){
       try{ setUsernames(await window.fbUsernames.getAll()); }catch(e){console.warn(e);}
     })();
   },[]);
+  // Saved goals ("current project"), live — shown/kept/changed right here.
+  const [goals,setGoals]=useState({});
+  useEffect(()=>window.fbGoals.listen(setGoals),[]);
 
   function firstNameOf(u){ return String(u||"").split(".")[0].trim().toLowerCase(); }
 
@@ -541,10 +592,6 @@ function EnterScores({allEntries,setAllEntries,setToast}){
     setSaving(true);
     const priorAttempts = getAttemptsToday(allEntries,normName,cw,today);
     try{
-      // First entry today = a new sign-in, so the ninja starts with no goal.
-      if(priorAttempts===0 && window.cnResetGoalOnSignIn){
-        try{ await window.cnResetGoalOnSignIn(normName, usernames); }catch(e){ console.warn(e); }
-      }
       const result=await window.fbLeaderboard.addEntry(cw,normName,p,today,hours);
       const newEntry={id:result.id,week:cw,name:normName,points:p,date:today,sessionHours:hours,createdAt:Date.now()};
       setAllEntries(prev=>[...prev,newEntry]);
@@ -661,7 +708,7 @@ function EnterScores({allEntries,setAllEntries,setToast}){
       <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.35)",marginBottom:8}}>{window.getWeekLabel(cw)}</p>
       <div style={{marginBottom:24,background:"rgba(0,207,255,0.06)",border:"1px solid #00cfff33",borderRadius:8,padding:"8px 14px"}}>
         <p style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#00cfff",margin:0,lineHeight:1.6}}>
-          💡 Entering a ninja here signs them in for the hours you pick (+{window.SESSION_GRACE_MIN} min extra) — logging in requires being entered here first. Their first entry each day also clears their goal until a Sensei assigns a new one.
+          💡 Entering a ninja here signs them in for the hours you pick (+{window.SESSION_GRACE_MIN} min extra) — logging in requires being entered here first. Their saved goal carries over, but needs a Sensei check on each new day.
         </p>
       </div>
 
@@ -841,6 +888,10 @@ function EnterScores({allEntries,setAllEntries,setToast}){
               </p>
             </div>
           ):null}
+          {previewName&&(()=>{
+            const account=window.findLinkedAccount(previewName,usernames);
+            return account?<ProjectPanel account={account} current={goals[window.cnKeySafe(account)]}/>:null;
+          })()}
           {allTime&&(
             <div style={{marginTop:12,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:8,padding:"10px 12px"}}>
               <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",marginBottom:8,letterSpacing:1}}>ALL-TIME</div>

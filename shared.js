@@ -506,20 +506,67 @@
     return `${belt.belt} Belt · L${set[0]} · ${part.label}: ${set[part.col]}`;
   };
 
-  // Goals only last for the ninja's current visit: each one is stamped with
-  // the day it was set, a ninja's first Points entry of the day wipes it
-  // ("new sign-in = no goal"), and CodeBot deletes it once their sign-in
-  // window closes. Anything not from today is treated as no goal.
+  // Steps a ninja moves through, in order, for the ◀ / ▶ buttons and the Part
+  // dropdown: Build -> Debugging per project, then the level's Quest &
+  // Adventure (one shared step, once per level, after the level's last
+  // project). Explore is not a goal step.
+  window.CN_GOAL_STEP_PARTS = ["build","debug","quest"];
+  const stepCache = {};
+  window.cnCurriculumSteps = function(section){
+    if(stepCache[section]) return stepCache[section];
+    const steps = [];
+    (window.CN_CURRICULUM[section] || []).forEach(b => {
+      b.sets.forEach((set, i) => {
+        steps.push({belt:b.belt, setIdx:i, part:"build"});
+        if(set[3]) steps.push({belt:b.belt, setIdx:i, part:"debug"});
+        const next = b.sets[i+1];
+        const lastOfLevel = !next || next[0] !== set[0];
+        if(lastOfLevel && set[4]) steps.push({belt:b.belt, setIdx:i, part:"quest", level:set[0]});
+      });
+    });
+    return (stepCache[section] = steps);
+  };
+  // Where a (belt, setIdx, part) sits in that order. Explore counts as its
+  // project's Build; a Quest picked on any project of a level maps to that
+  // level's single Quest & Adventure step.
+  window.cnStepIndex = function(section, belt, setIdx, part){
+    const steps = window.cnCurriculumSteps(section);
+    const b = (window.CN_CURRICULUM[section] || []).find(x => x.belt === belt);
+    if(!b || !b.sets[setIdx]) return -1;
+    if(part === "explore") part = "build";
+    if(part === "quest"){
+      const level = b.sets[setIdx][0];
+      return steps.findIndex(s => s.belt === belt && s.part === "quest" && s.level === level);
+    }
+    return steps.findIndex(s => s.belt === belt && s.setIdx === setIdx && s.part === part);
+  };
+  // The step before (dir = -1) or after (dir = +1) the given one, or null at
+  // either end. With nothing selected yet, "next" starts at the very first step.
+  window.cnStepGoal = function(section, belt, setIdx, part, dir){
+    const steps = window.cnCurriculumSteps(section);
+    if(!steps.length) return null;
+    const i = window.cnStepIndex(section, belt, setIdx, part);
+    if(i < 0) return dir > 0 ? steps[0] : null;
+    return steps[i + dir] || null;
+  };
+
+  // Goals ("current project") are SAVED per ninja and kept between visits.
+  // `date` is the day a Sensei last set or confirmed it. On a new day the
+  // saved goal still shows, but it needs a check: the kiosk announces it and
+  // In The Dojo / Points / Ninjas ask a Sensei to keep it or change it.
+  //   cnGoalActive(g)    -> goal set/confirmed today (good to go)
+  //   cnGoalNeedsCheck(g) -> no goal at all, or a saved goal from an earlier day
   window.cnGoalActive = function(g){ return !!(g && g.goal && g.date === window.todayStr()); };
-  function activeGoals(all){
-    const out = {};
-    for(const [k,g] of Object.entries(all || {})) if(window.cnGoalActive(g)) out[k] = g;
-    return out;
-  }
+  window.cnGoalNeedsCheck = function(g){ return !window.cnGoalActive(g); };
   window.fbGoals = {
     async getAll(){
       const snap = await db.ref("goals").once("value");
-      return activeGoals(snap.val());
+      return snap.val() || {};
+    },
+    async get(accountKey){
+      if(!accountKey) return null;
+      const snap = await db.ref(`goals/${accountKey}`).once("value");
+      return snap.val() || null;
     },
     // extra: optional structured info, e.g. {belt, setIdx, part, project}
     async setGoal(accountKey, name, section, goal, extra){
@@ -527,29 +574,133 @@
         name: name || "", section: section || "", goal: goal || "", date: window.todayStr(), updatedAt: Date.now()
       }, extra || {}));
     },
+    // "Still on this" — keeps the saved goal and marks it checked for today.
+    async confirm(accountKey){
+      if(!accountKey) return;
+      await db.ref(`goals/${accountKey}`).update({date: window.todayStr(), confirmedAt: Date.now()});
+    },
     async clearGoal(accountKey){
       if(!accountKey) return;
       await db.ref(`goals/${accountKey}`).remove();
     },
     // Realtime listener — fires immediately on any change, from any window.
-    // Only today's goals are passed on.
+    // Passes every saved goal; use cnGoalActive / cnGoalNeedsCheck on each.
     listen(callback){
       const ref = db.ref("goals");
-      const handler = snap => callback(activeGoals(snap.val()));
+      const handler = snap => callback(snap.val() || {});
       ref.on("value", handler);
       return () => ref.off("value", handler);
     }
   };
-  // Called when a ninja gets their FIRST Points entry of the day: they start
-  // the visit with no goal until a Sensei assigns one.
-  window.cnResetGoalOnSignIn = async function(name, usernames){
-    const keys = new Set([window.cnKeySafe(name)]);
-    try{
-      const list = usernames || await window.fbUsernames.getAll();
-      const linked = window.findLinkedAccount(name, list);
-      if(linked) keys.add(window.cnKeySafe(linked));
-    }catch(e){}
-    await Promise.all([...keys].map(k => window.fbGoals.clearGoal(k).catch(()=>{})));
+
+  // Shared goal picker (plain React.createElement, no JSX) used by the
+  // Ninjas tab, In The Dojo and Points so every place sets goals the same
+  // way. Impact -> Belt / Activity / Part dropdowns from CN_CURRICULUM;
+  // other sections -> short text. Props: {account, current, onDone, compact}.
+  window.CnGoalPicker = function CnGoalPicker(props){
+    const h = React.createElement;
+    const {account, current, onDone} = props;
+    const cur = current || {};
+    const [section,setSection] = React.useState(cur.section || window.CN_SECTIONS[0]);
+    const [goal,setGoal] = React.useState(cur.section && !(window.CN_CURRICULUM||{})[cur.section] ? (cur.goal||"") : "");
+    const [belt,setBelt] = React.useState(cur.belt || "");
+    const [setIdx,setSetIdx] = React.useState(Number.isInteger(cur.setIdx) ? String(cur.setIdx) : "");
+    // Explore isn't a goal step any more — an old Explore goal opens as that project's Build.
+    const [part,setPart] = React.useState(cur.part === "explore" ? "build" : (cur.part || ""));
+    const [saving,setSaving] = React.useState(false);
+    const curriculum = (window.CN_CURRICULUM||{})[section] || null;
+    const beltObj = curriculum ? curriculum.find(b => b.belt === belt) : null;
+    const setObj = beltObj && setIdx !== "" ? beltObj.sets[Number(setIdx)] : null;
+    const parts = setObj ? window.CN_GOAL_PARTS.filter(p => window.CN_GOAL_STEP_PARTS.includes(p.id) && !!setObj[p.col]) : [];
+    // ◀ / ▶ : move to the previous / next step (Build -> Debugging -> Quest & Adventure -> next project).
+    const curIdx = setIdx === "" ? NaN : Number(setIdx);
+    const prevStep = curriculum ? window.cnStepGoal(section, belt, curIdx, part, -1) : null;
+    const nextStep = curriculum ? window.cnStepGoal(section, belt, curIdx, part, +1) : null;
+    function stepLabel(st){
+      if(!st) return "";
+      const t = window.cnCurriculumGoalText(section, st.belt, st.setIdx, st.part);
+      return t.replace(/^(\w+) Belt · /, "$1 · ");
+    }
+    function goStep(st){ if(!st) return; setBelt(st.belt); setSetIdx(String(st.setIdx)); setPart(st.part); }
+    const text = curriculum ? window.cnCurriculumGoalText(section, belt, Number(setIdx), part) : goal.trim();
+    const canSave = !!text && !!account;
+    const sel = {width:"100%",marginBottom:6,padding:"7px 8px",borderRadius:6,background:"rgba(0,0,0,0.45)",
+      border:"1px solid rgba(255,255,255,0.18)",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:11};
+    const btn = (bg,color,border) => ({padding:"8px 10px",borderRadius:7,cursor:saving?"not-allowed":"pointer",background:bg,color,
+      border:border||"none",fontFamily:"'Fira Code',monospace",fontSize:10,fontWeight:700});
+    // Auto-save: as soon as a complete goal is picked it's saved, and every
+    // later change (dropdowns, ◀ / ▶, typing) saves again on its own — no
+    // Save button. Curriculum picks save instantly; typed goals save 0.8s
+    // after the Sensei stops typing.
+    const savedTextRef = React.useRef(cur.goal || "");
+    const savedAnyRef = React.useRef(false);
+    const [status,setStatus] = React.useState(""); // "" | "saving" | "saved" | "error"
+    async function save(){
+      if(!canSave || text === savedTextRef.current) return;
+      const prev = savedTextRef.current;
+      savedTextRef.current = text;            // claim it so a re-render can't double-save
+      setSaving(true); setStatus("saving");
+      try{
+        const key = window.cnKeySafe(account);
+        if(curriculum) await window.fbGoals.setGoal(key, account, section, text, {belt, setIdx:Number(setIdx), part, project:setObj[1]});
+        else await window.fbGoals.setGoal(key, account, section, text);
+        savedAnyRef.current = true; setStatus("saved");
+        props.onSaved && props.onSaved();
+      }catch(e){
+        console.warn(e); savedTextRef.current = prev; setStatus("error");
+        window.cnDialog.alert("Couldn't save the goal. Please try again.");
+      }
+      setSaving(false);
+    }
+    React.useEffect(()=>{
+      if(!canSave || text === savedTextRef.current) return;
+      const t = setTimeout(save, curriculum ? 0 : 800);
+      return ()=>clearTimeout(t);
+    }, [text, account]);
+    async function clear(){
+      if(saving) return;
+      setSaving(true);
+      try{
+        await window.fbGoals.clearGoal(window.cnKeySafe(account));
+        savedAnyRef.current = true;
+        onDone && onDone(true);
+      }catch(e){ console.warn(e); }
+      setSaving(false);
+    }
+    const kids = [
+      h("select",{key:"sec",value:section,style:sel,onChange:e=>{setSection(e.target.value);setBelt("");setSetIdx("");setPart("");}},
+        window.CN_SECTIONS.map(s => h("option",{key:s,value:s},s)))
+    ];
+    if(curriculum){
+      const stepBtn = (st, label, title) => h("button",{type:"button",onClick:()=>goStep(st),disabled:!st||saving,title:st?title+": "+stepLabel(st):"",
+        style:{flex:1,minWidth:0,padding:"7px 8px",borderRadius:7,cursor:st?"pointer":"not-allowed",opacity:st?1:0.35,
+          background:"rgba(255,255,255,0.06)",border:"1px solid rgba(0,207,255,0.35)",color:"#00cfff",
+          fontFamily:"'Fira Code',monospace",fontSize:10,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}},label);
+      kids.push(h("div",{key:"steps",style:{display:"flex",gap:6,marginBottom:6}},
+        stepBtn(prevStep, "◀ Previous", "Previous step"),
+        stepBtn(nextStep, setObj ? "Next ▶" : "Start ▶", "Next step")));
+      if(nextStep && setObj) kids.push(h("div",{key:"nexthint",style:{margin:"-2px 0 6px",fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.4)",
+        overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"},title:stepLabel(nextStep)},"next: "+stepLabel(nextStep)));
+      kids.push(h("select",{key:"belt",value:belt,style:sel,onChange:e=>{setBelt(e.target.value);setSetIdx("");setPart("");}},
+        [h("option",{key:"",value:""},"— Belt —")].concat(curriculum.map(b => h("option",{key:b.belt,value:b.belt},b.belt+" Belt")))));
+      if(beltObj) kids.push(h("select",{key:"set",value:setIdx,style:sel,onChange:e=>{setSetIdx(e.target.value);setPart("build");}},
+        [h("option",{key:"",value:""},"— Activity —")].concat(beltObj.sets.map((st,i) => h("option",{key:i,value:String(i)},`Level ${st[0]} · ${st[1]}`)))));
+      if(setObj) kids.push(h("select",{key:"part",value:part,style:sel,onChange:e=>setPart(e.target.value)},
+        parts.map(p => h("option",{key:p.id,value:p.id},`${p.label}: ${setObj[p.col]}`))));
+    } else {
+      kids.push(h("input",{key:"txt",value:goal,onChange:e=>setGoal(e.target.value),placeholder:"Project goal (e.g. Finish the maze level)",
+        style:Object.assign({},sel,{fontFamily:"'Exo 2',sans-serif"})}));
+    }
+    if(text) kids.push(h("div",{key:"pv",style:{margin:"2px 0 8px",fontFamily:"'Exo 2',sans-serif",fontSize:11,color:"#00cfff",lineHeight:1.4}},"🎯 "+text));
+    const statusText = status === "saving" ? "Saving…" : status === "saved" ? "✓ Saved" : status === "error" ? "⚠ Not saved"
+      : canSave ? "✓ Saved" : "Pick a goal — it saves automatically";
+    const statusColor = status === "error" ? "#ff2d78" : (status === "saved" || (canSave && !status)) ? "#39ff14" : "rgba(255,255,255,0.45)";
+    kids.push(h("div",{key:"btns",style:{display:"flex",gap:6,alignItems:"center"}},
+      h("div",{style:{flex:1,fontFamily:"'Fira Code',monospace",fontSize:10,color:statusColor}},statusText),
+      (cur.goal || savedAnyRef.current) ? h("button",{onClick:clear,disabled:saving,style:btn("rgba(255,45,120,0.1)","#ff2d78","1px solid rgba(255,45,120,0.4)")},"Clear") : null,
+      onDone ? h("button",{onClick:()=>onDone(savedAnyRef.current),disabled:saving,style:btn("linear-gradient(135deg,#39ff14,#00cfff)","#000")},"Done") : null
+    ));
+    return h("div",{style:{padding:10,borderRadius:8,background:"rgba(0,207,255,0.06)",border:"1px solid #00cfff33"}},kids);
   };
 
   // -------------------------------------------------------------------------
@@ -630,6 +781,14 @@
     {id:"chat",icon:"💬",label:"Ninja Chat",href:"chat.html"},
     {id:"tutorial",icon:"📘",label:"Tutorial",href:"tutorial.html"},
   ];
+  // Admin-only tab: every registered ninja's current project. Added to the
+  // nav only for a Sensei session, so every page's Sidebar shows it without
+  // per-page changes (the role is read when the page loads).
+  try{
+    if(sessionStorage.getItem("cn_role") === "admin"){
+      window.CN_NAV.splice(6, 0, {id:"ninjas",icon:"🥷",label:"Ninjas",href:"ninjas.html",adminOnly:true});
+    }
+  }catch(e){}
 
   // Given the first-name recorded on a Points entry, finds the matching full
   // registered username (e.g. "adam" -> "adam.dodo") if one exists. Shared by
@@ -710,6 +869,38 @@
   window.ENTRY_COOLDOWN_MS = window.ENTRY_COOLDOWN_MINUTES*60*1000;
   const HEARTBEAT_MS = 20*1000; // how often an open tab "checks in"
   const STALE_MS = 45*1000;     // how long before a dead session can be taken over
+
+  // "Get back to work" tracking (see startHeartbeat). A ninja's active streak
+  // ends if they're away from the site (tab hidden/unfocused/closed, or on a
+  // break) for longer than this.
+  window.SITE_ACTIVE_GAP_MS = 60*1000;
+  // Default for how long a ninja may be actively on the site before the kiosk
+  // tells them to get back to work. Senseis change it via CodeBot
+  // ("site time limit 10", or "off"); stored at codebot/settings/siteTimeLimitMin.
+  window.CN_SITE_TIME_LIMIT_MIN = 15;
+  // Minutes of the current active streak for one activeSessions entry (0 if
+  // they're not actively on the site right now).
+  window.cnSiteStreakMin = function(v, now){
+    now = now || Date.now();
+    if(!v || !v.activeSince || !v.lastActiveAt || (now - v.lastActiveAt) >= window.SITE_ACTIVE_GAP_MS) return 0;
+    return Math.max(0, (now - v.activeSince) / 60000);
+  };
+  window.fbActiveSessions = {
+    listen(callback){
+      const ref = db.ref("activeSessions");
+      const handler = snap => callback(snap.val() || {});
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
+    },
+    // Live site-time limit in minutes (0 = off).
+    listenLimit(callback){
+      const ref = db.ref("codebot/settings/siteTimeLimitMin");
+      const handler = snap => { const v = snap.val(); callback(v === null || v === undefined ? window.CN_SITE_TIME_LIMIT_MIN : Number(v)||0); };
+      ref.on("value", handler);
+      return () => ref.off("value", handler);
+    },
+    setLimit(min){ return db.ref("codebot/settings/siteTimeLimitMin").set(Math.max(0, Math.round(Number(min)||0))); }
+  };
 
   function randId(){ return "sess_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2); }
 
@@ -841,10 +1032,32 @@
       if(!accountKey) return;
       const ref = db.ref(`activeSessions/${accountKey}`);
       const sessionId = sessionStorage.getItem("cn_session_id");
+      const isStudent = sessionStorage.getItem("cn_role") === "student";
       this._heartbeatTimer = setInterval(()=>{
-        ref.once("value").then(snap=>{
+        ref.once("value").then(async snap=>{
           const v = snap.val();
-          if(v && v.sessionId === sessionId){ ref.update({lastSeen: Date.now()}); }
+          if(!v || v.sessionId !== sessionId) return;
+          const now = Date.now();
+          const upd = {lastSeen: now};
+          // Ninjas only: track how long they've been ACTIVELY on the site
+          // (this tab visible + focused, and not on a break) so the kiosk can
+          // tell them to get back to work. The streak survives page changes
+          // but resets once they've been away for SITE_ACTIVE_GAP_MS.
+          if(isStudent){
+            let active = !document.hidden && (typeof document.hasFocus !== "function" || document.hasFocus());
+            if(active){
+              try{
+                const b = (await db.ref(`games/onBreak/${accountKey}`).once("value")).val();
+                if(window.cnIsBreakActive(b)) active = false;
+              }catch(e){}
+            }
+            if(active){
+              const continuing = v.activeSince && v.lastActiveAt && (now - v.lastActiveAt) < window.SITE_ACTIVE_GAP_MS;
+              upd.activeSince = continuing ? v.activeSince : now;
+              upd.lastActiveAt = now;
+            }
+          }
+          ref.update(upd);
         }).catch(()=>{});
       }, HEARTBEAT_MS);
     },

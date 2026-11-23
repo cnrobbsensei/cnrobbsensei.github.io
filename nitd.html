@@ -186,137 +186,62 @@ function openKioskDisplay(){
     `width=${w},height=${h},menubar=no,toolbar=no,location=no,status=no,resizable=yes,scrollbars=yes`);
 }
 
-const GOAL_SELECT = {width:"100%",marginBottom:6,padding:"6px 8px",borderRadius:6,background:"rgba(0,0,0,0.4)",border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Fira Code',monospace",fontSize:10};
-
-// Inline per-ninja goal assignment: a section dropdown, then (for Impact) the
-// curriculum Belt -> Activity -> Part dropdowns, or a short goal text for
-// sections without a curriculum list. Goals last for today's visit only,
-// saved straight to Firebase. Every open Kiosk window (and every other
-// Sensei's "In The Dojo" tab) picks the change up immediately via
-// window.fbGoals.listen — no refresh needed anywhere.
+// Per-ninja goal ("current project") on each In The Dojo card. Goals are
+// saved between visits (see cnGoalActive / cnGoalNeedsCheck in shared.js):
+// on a new day the saved goal shows with "Needs check" until a Sensei keeps
+// it ("✓ Still on this") or changes it. Editing uses the shared
+// window.CnGoalPicker, the same picker as the Ninjas tab and Points.
 function GoalEditor({account,current}){
   const [editing,setEditing]=useState(false);
-  const [section,setSection]=useState((current&&current.section)||window.CN_SECTIONS[0]);
-  const [goal,setGoal]=useState((current&&current.goal)||"");
-  // Curriculum picks (Impact): belt -> activity set -> part
-  const [belt,setBelt]=useState((current&&current.belt)||"");
-  const [setIdx,setSetIdx]=useState(current&&Number.isInteger(current.setIdx)?String(current.setIdx):"");
-  const [part,setPart]=useState((current&&current.part)||"");
-  const [saving,setSaving]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const Picker = window.CnGoalPicker;
+  const has = !!(current&&current.goal);
+  const checked = window.cnGoalActive(current);
 
-  useEffect(()=>{
-    if(!editing){
-      setSection((current&&current.section)||window.CN_SECTIONS[0]);
-      setGoal((current&&current.goal)||"");
-      setBelt((current&&current.belt)||"");
-      setSetIdx(current&&Number.isInteger(current.setIdx)?String(current.setIdx):"");
-      setPart((current&&current.part)||"");
-    }
-  },[current,editing]);
-
-  const curriculum = (window.CN_CURRICULUM||{})[section] || null;
-  const beltObj = curriculum ? curriculum.find(b=>b.belt===belt) : null;
-  const setObj = beltObj && setIdx!=="" ? beltObj.sets[Number(setIdx)] : null;
-  const parts = setObj ? window.CN_GOAL_PARTS.filter(p=>!!setObj[p.col]) : [];
-  const curriculumGoal = curriculum ? window.cnCurriculumGoalText(section, belt, Number(setIdx), part) : "";
-  const canSave = curriculum ? !!curriculumGoal : !!goal.trim();
-
-  async function save(){
-    if(!account||saving||!canSave) return;
-    setSaving(true);
-    try{
-      if(curriculum){
-        await window.fbGoals.setGoal(window.cnKeySafe(account), account, section, curriculumGoal,
-          {belt, setIdx:Number(setIdx), part, project:setObj[1]});
-      } else {
-        await window.fbGoals.setGoal(window.cnKeySafe(account), account, section, goal.trim());
-      }
-      setEditing(false);
-    }catch(e){ console.warn(e); window.cnDialog.alert("Couldn't save the goal. Please try again."); }
-    setSaving(false);
-  }
-  async function clear(){
-    if(!account||saving) return;
-    setSaving(true);
-    try{ await window.fbGoals.clearGoal(window.cnKeySafe(account)); setEditing(false); }
-    catch(e){ console.warn(e); }
-    setSaving(false);
+  async function keep(){
+    if(!account||busy) return;
+    setBusy(true);
+    try{ await window.fbGoals.confirm(window.cnKeySafe(account)); }
+    catch(e){ console.warn(e); window.cnDialog.alert("Couldn't save. Please try again."); }
+    setBusy(false);
   }
 
-  if(!editing){
-    return(
-      <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
-          <div style={{overflow:"hidden"}}>
-            {current&&current.goal?(
-              <>
-                <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#00cfff",letterSpacing:.5}}>{current.section||"—"}</div>
-                <div style={{fontFamily:"'Exo 2',sans-serif",fontSize:11.5,color:"rgba(255,255,255,0.8)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-                  🎯 {current.goal}
-                </div>
-              </>
-            ):(
-              <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#ffd700"}}>🎯 No goal yet — assign one</div>
-            )}
-          </div>
-          {account&&(
-            <button onClick={()=>setEditing(true)} style={{flexShrink:0,background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",
-              borderRadius:7,color:"rgba(255,255,255,0.7)",padding:"5px 9px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:9}}>
-              ✏ {current&&current.goal?"Edit":"Assign"}
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
+  if(editing) return <div style={{marginTop:8}}><Picker account={account} current={current} onDone={()=>setEditing(false)}/></div>;
 
   return(
-    <div style={{marginTop:8,padding:"10px",borderRadius:8,background:"rgba(0,207,255,0.06)",border:"1px solid #00cfff33"}}>
-      <select value={section} onChange={e=>{setSection(e.target.value);setBelt("");setSetIdx("");setPart("");}} style={GOAL_SELECT}>
-        {window.CN_SECTIONS.map(s=><option key={s} value={s}>{s}</option>)}
-      </select>
-      {curriculum?(
-        <>
-          <select value={belt} onChange={e=>{setBelt(e.target.value);setSetIdx("");setPart("");}} style={GOAL_SELECT}>
-            <option value="">— Belt —</option>
-            {curriculum.map(b=><option key={b.belt} value={b.belt}>{b.belt} Belt</option>)}
-          </select>
-          {beltObj&&(
-            <select value={setIdx} onChange={e=>{setSetIdx(e.target.value);setPart("build");}} style={GOAL_SELECT}>
-              <option value="">— Activity —</option>
-              {beltObj.sets.map((st,i)=><option key={i} value={String(i)}>Level {st[0]} · {st[1]}</option>)}
-            </select>
+    <div style={{marginTop:8,padding:"8px 10px",borderRadius:8,
+      background:checked?"rgba(255,255,255,0.04)":"rgba(255,215,0,0.06)",
+      border:`1px solid ${checked?"rgba(255,255,255,0.08)":"#ffd70044"}`}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:6}}>
+        <div style={{overflow:"hidden",minWidth:0}}>
+          {has?(
+            <>
+              <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:checked?"#00cfff":"#ffd700",letterSpacing:.5}}>
+                {current.section||"—"}{checked?" · ✓ checked today":" · ⏳ needs check (from "+(current.date||"before")+")"}
+              </div>
+              <div title={current.goal} style={{fontFamily:"'Exo 2',sans-serif",fontSize:11.5,color:"rgba(255,255,255,0.8)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                🎯 {current.goal}
+              </div>
+            </>
+          ):(
+            <div style={{fontFamily:"'Fira Code',monospace",fontSize:10,color:"#ffd700"}}>🎯 No goal yet — assign one</div>
           )}
-          {setObj&&(
-            <select value={part} onChange={e=>setPart(e.target.value)} style={GOAL_SELECT}>
-              {parts.map(p=><option key={p.id} value={p.id}>{p.label}: {setObj[p.col]}</option>)}
-            </select>
-          )}
-          {curriculumGoal&&(
-            <div style={{marginBottom:8,fontFamily:"'Exo 2',sans-serif",fontSize:10.5,color:"#00cfff",lineHeight:1.4}}>🎯 {curriculumGoal}</div>
-          )}
-        </>
-      ):(
-        <input value={goal} onChange={e=>setGoal(e.target.value)} placeholder="Project goal (e.g. Finish the maze level)"
-          style={{width:"100%",marginBottom:8,padding:"6px 8px",borderRadius:6,background:"rgba(0,0,0,0.4)",
-            border:"1px solid rgba(255,255,255,0.15)",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:11}}/>
-      )}
-      <div style={{display:"flex",gap:6}}>
-        <button onClick={save} disabled={saving||!canSave} style={{flex:1,padding:"7px",borderRadius:7,border:"none",cursor:saving||!canSave?"not-allowed":"pointer",
-          opacity:canSave?1:0.45,
-          background:"linear-gradient(135deg,#39ff14,#00cfff)",color:"#000",fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:9,letterSpacing:.5}}>
-          {saving?"...":"💾 Save"}
-        </button>
-        {current&&current.goal&&(
-          <button onClick={clear} disabled={saving} style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,45,120,0.4)",
-            cursor:saving?"not-allowed":"pointer",background:"rgba(255,45,120,0.1)",color:"#ff2d78",fontFamily:"'Fira Code',monospace",fontSize:9}}>
-            Clear
-          </button>
+        </div>
+        {account&&(
+          <div style={{display:"flex",gap:4,flexShrink:0}}>
+            {has&&!checked&&(
+              <button onClick={keep} disabled={busy} title="Keep this goal for today"
+                style={{background:"rgba(57,255,20,0.12)",border:"1px solid #39ff1455",borderRadius:7,color:"#39ff14",
+                  padding:"5px 8px",cursor:busy?"not-allowed":"pointer",fontFamily:"'Fira Code',monospace",fontSize:9}}>
+                {busy?"…":"✓ Still on this"}
+              </button>
+            )}
+            <button onClick={()=>setEditing(true)} style={{background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.15)",
+              borderRadius:7,color:"rgba(255,255,255,0.7)",padding:"5px 9px",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:9}}>
+              ✏ {has?"Change":"Assign"}
+            </button>
+          </div>
         )}
-        <button onClick={()=>setEditing(false)} disabled={saving} style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",
-          cursor:saving?"not-allowed":"pointer",background:"rgba(255,255,255,0.05)",color:"rgba(255,255,255,0.6)",fontFamily:"'Fira Code',monospace",fontSize:9}}>
-          Cancel
-        </button>
       </div>
     </div>
   );
@@ -405,7 +330,6 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
     setEndingAccount(account);
     try{
       await window.cnSession.endSession(window.cnKeySafe(account));
-      try{ await window.fbGoals.clearGoal(window.cnKeySafe(account)); }catch(e){}
       await onRefresh();
     } catch(e){ console.warn(e); window.cnDialog.alert("Something went wrong ending the session: "+(e&&e.message?e.message:e)); }
     setEndingAccount(null);
@@ -455,12 +379,10 @@ function NITDTab({allEntries,usernames,breakStatuses,goals,locks,revocations,isA
     try{
       await window.fbAccessRevocation.revoke(nameKey);
       await window.cnSession.forceLogoutKey(nameKey);
-      try{ await window.fbGoals.clearGoal(nameKey); }catch(e){}
       if(account){
         const acctKey = window.cnKeySafe(account);
         await window.fbAccessRevocation.revoke(acctKey);
         await window.cnSession.forceLogoutKey(acctKey);
-        try{ await window.fbGoals.clearGoal(acctKey); }catch(e){}
       }
       await onRefresh();
     } catch(e){ console.warn(e); window.cnDialog.alert("Something went wrong removing them: "+(e&&e.message?e.message:e)); }

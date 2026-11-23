@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<title>Code Ninjas – Ninjas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Exo+2:wght@400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;background:#060609;color:#fff;}
+#root{min-height:100vh;display:flex;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(57,255,20,0.3);border-radius:99px;}
+select option{background:#0a0a0f;color:#fff;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+@media(max-width:768px){#root{flex-direction:column;}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="shared.js"></script>
+<script src="codebot.js"></script>
+<script src="codebot-ai.js"></script>
+<script type="text/babel">
+const {useState,useEffect} = React;
+const TourOverlay = window.CnTourOverlay;
+
+function Glass({children,style={},onClick,onMouseEnter,onMouseLeave}){
+  return(
+    <div onClick={onClick} onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} style={{
+      background:"rgba(255,255,255,0.06)",backdropFilter:"blur(18px)",WebkitBackdropFilter:"blur(18px)",
+      border:"1px solid rgba(255,255,255,0.12)",borderRadius:16,
+      boxShadow:"0 8px 32px rgba(0,0,0,0.4),inset 0 1px 0 rgba(255,255,255,0.08)",...style
+    }}>{children}</div>
+  );
+}
+function LoadingScreen({status}){
+  return(
+    <div style={{position:"fixed",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:"#060609",zIndex:200,gap:16,padding:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:13,color:"#39ff14",letterSpacing:2}}>LOADING DOJO...</div>
+      <div style={{width:36,height:36,border:"3px solid rgba(57,255,20,0.2)",borderTop:"3px solid #39ff14",borderRadius:"50%",animation:"spin 1s linear infinite"}}/>
+      <div style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.3)"}}>{status}</div>
+    </div>
+  );
+}
+function useIsMobile(){
+  const [mobile,setMobile]=useState(window.innerWidth<=768);
+  useEffect(()=>{const h=()=>setMobile(window.innerWidth<=768);window.addEventListener("resize",h);return()=>window.removeEventListener("resize",h);},[]);
+  return mobile;
+}
+const NAV = window.CN_NAV;
+function doLogout(){ window.cnSession.logout(); }
+
+function MobileNav({active,isAdmin,isStudent,studentUsername}){
+  const [open,setOpen]=useState(false);
+  return(
+    <div data-tour-mobile-anchor="1" style={{position:"sticky",top:0,zIndex:50,background:"rgba(6,6,9,0.95)",backdropFilter:"blur(16px)",borderBottom:"1px solid rgba(255,255,255,0.08)",padding:"10px 16px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,color:"#39ff14",letterSpacing:1}}>CODE NINJAS <span style={{fontFamily:"'Fira Code',monospace",fontSize:8,color:"rgba(255,255,255,0.3)",letterSpacing:2}}>ROBBINSVILLE</span></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+            title={isStudent?"View my profile":undefined}
+            style={{padding:"3px 8px",borderRadius:99,
+            background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+            border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,
+            fontFamily:"'Fira Code',monospace",fontSize:9,
+            color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",
+            cursor:isStudent?"pointer":"default",
+            maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"🔐 ADMIN":isStudent?`🥷 ${studentUsername}`:"👀 GUEST"}
+          </div>
+          <button onClick={()=>setOpen(!open)} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:8,color:"#fff",padding:"6px 10px",cursor:"pointer",fontSize:16}}>{open?"✕":"☰"}</button>
+        </div>
+      </div>
+      {open&&(
+        <div style={{marginTop:10,display:"flex",flexDirection:"column",gap:4}}>
+          {NAV.map(item=>(
+            <button key={item.id} data-tour-nav={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+              display:"flex",alignItems:"center",gap:10,padding:"10px 14px",borderRadius:10,border:"none",cursor:"pointer",
+              fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",
+              background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"rgba(255,255,255,0.04)",
+              color:active===item.id?"#fff":"rgba(255,255,255,0.6)"}}>
+              <span style={{fontSize:18}}>{item.icon}</span>{item.label}
+            </button>
+          ))}
+          <button onClick={doLogout} style={{padding:"9px 14px",borderRadius:10,border:"1px solid rgba(255,45,120,0.3)",background:"rgba(255,45,120,0.08)",color:"#ff2d78",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1}}>← LOG OUT</button>
+        </div>
+      )}
+    </div>
+  );
+}
+function Sidebar({active,isAdmin,isStudent,studentUsername}){
+  return(
+    <div style={{width:210,flexShrink:0,height:"100vh",display:"flex",flexDirection:"column",padding:"22px 14px",gap:6,
+      background:"rgba(0,0,0,0.35)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
+      borderRight:"1px solid rgba(255,255,255,0.06)",zIndex:10,position:"sticky",top:0}}>
+      <div style={{padding:"10px 10px 20px",textAlign:"center"}}>
+        <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:900,fontSize:11,letterSpacing:1.5,color:"#39ff14",lineHeight:1.4}}>CODE NINJAS</div>
+        <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:2,marginTop:2}}>ROBBINSVILLE</div>
+        <div style={{width:36,height:2,background:"linear-gradient(90deg,#39ff14,#00cfff)",margin:"10px auto 8px",borderRadius:99}}/>
+        <div onClick={()=>{ if(isStudent) window.cnGoToProfile(studentUsername,"student"); }}
+          title={isStudent?"View my profile":undefined}
+          style={{display:"inline-flex",alignItems:"center",gap:5,cursor:isStudent?"pointer":"default",
+          background:isAdmin?"rgba(57,255,20,0.12)":isStudent?"rgba(255,215,0,0.1)":"rgba(0,207,255,0.1)",
+          border:`1px solid ${isAdmin?"#39ff1444":isStudent?"#ffd70044":"#00cfff44"}`,borderRadius:99,padding:"4px 10px"}}>
+          <span style={{fontSize:10}}>{isAdmin?"🔐":isStudent?"🥷":"👀"}</span>
+          <span style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:isAdmin?"#39ff14":isStudent?"#ffd700":"#00cfff",letterSpacing:1,maxWidth:90,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            {isAdmin?"ADMIN":isStudent?studentUsername:"GUEST"}
+          </span>
+        </div>
+      </div>
+      {NAV.map(item=>(
+        <button key={item.id} data-tour-nav={item.id} onClick={()=>{window.location.href=item.href;}} style={{
+          display:"flex",alignItems:"center",gap:10,padding:"11px 14px",borderRadius:11,border:"none",cursor:"pointer",
+          fontFamily:"'Exo 2',sans-serif",fontWeight:600,fontSize:12,transition:"all .2s",textAlign:"left",
+          background:active===item.id?"linear-gradient(135deg,rgba(57,255,20,0.18),rgba(0,207,255,0.12))":"transparent",
+          color:active===item.id?"#fff":"rgba(255,255,255,0.4)",
+          boxShadow:active===item.id?"inset 0 0 0 1px rgba(57,255,20,0.3),0 0 16px rgba(57,255,20,0.1)":"none"}}
+          onMouseEnter={e=>{if(active!==item.id){e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.color="#fff";}}}
+          onMouseLeave={e=>{if(active!==item.id){e.currentTarget.style.background="transparent";e.currentTarget.style.color="rgba(255,255,255,0.4)";}}}>
+          <span style={{fontSize:17}}>{item.icon}</span>{item.label}
+        </button>
+      ))}
+      <div style={{marginTop:"auto",padding:"0 0 4px"}}>
+        <Glass style={{padding:"11px 14px",marginBottom:8}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.3)",letterSpacing:1,marginBottom:3}}>CURRENT</div>
+          <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:12,color:"#39ff14"}}>WEEK {window.getCurrentWeek()}</div>
+        </Glass>
+        <button onClick={doLogout} style={{width:"100%",padding:"9px",borderRadius:9,border:"1px solid rgba(255,255,255,0.1)",
+          background:"rgba(255,255,255,0.03)",color:"rgba(255,255,255,0.35)",cursor:"pointer",
+          fontFamily:"'Fira Code',monospace",fontSize:10,letterSpacing:1,transition:"all .2s"}}
+          onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,45,120,0.1)";e.currentTarget.style.borderColor="#ff2d7844";e.currentTarget.style.color="#ff2d78";}}
+          onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,0.03)";e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";e.currentTarget.style.color="rgba(255,255,255,0.35)";}}>
+          ← LOG OUT
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Walkthrough step content now lives in shared.js (window.CN_TOUR_CONTENT)
+// so it can be reused by the arrow-pointer tour on every page, not just here.
+// -------------------------------------------------------------------------
+
+// ── Ninjas (Sensei only) ─────────────────────────────────────────────────────
+// Every registered ninja and their saved current project / goal, whether
+// they're in the dojo or not. Goals set here are the same ones In The Dojo,
+// Points, the kiosk and CodeBot use (goals/<accountKey>, via fbGoals).
+function StatusPill({present,minsLeft}){
+  return(
+    <span style={{padding:"2px 8px",borderRadius:99,fontFamily:"'Fira Code',monospace",fontSize:9,whiteSpace:"nowrap",
+      background:present?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.05)",
+      border:`1px solid ${present?"#39ff1455":"rgba(255,255,255,0.12)"}`,
+      color:present?"#39ff14":"rgba(255,255,255,0.4)"}}>
+      {present?`🟢 in the dojo · ${minsLeft} min left`:"⚪ not signed in"}
+    </span>
+  );
+}
+
+function NinjaRow({account,goal,present,minsLeft,onTouched}){
+  const [editing,setEditing]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const has=!!(goal&&goal.goal), checked=window.cnGoalActive(goal);
+  const Picker=window.CnGoalPicker;
+  async function keep(){
+    setBusy(true);
+    try{ await window.fbGoals.confirm(window.cnKeySafe(account)); onTouched&&onTouched(); }catch(e){ console.warn(e); }
+    setBusy(false);
+  }
+  const statusText = !has ? "No goal yet" : checked ? "✓ checked today" : `⏳ last set ${goal.date||"earlier"} — check on their next visit`;
+  const statusColor = !has ? "#ffd700" : checked ? "#39ff14" : "rgba(255,215,0,0.8)";
+  return(
+    <Glass style={{padding:"14px 16px",borderColor:present&&!checked?"#ffd70044":"rgba(255,255,255,0.1)"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+          <span onClick={()=>window.cnGoToProfile(account,"admin")} title="View profile"
+            style={{fontFamily:"'Exo 2',sans-serif",fontWeight:700,fontSize:14,color:"#fff",cursor:"pointer",
+              textDecoration:"underline",textDecorationColor:"rgba(57,255,20,0.3)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+            🥷 {account}
+          </span>
+        </div>
+        <StatusPill present={present} minsLeft={minsLeft}/>
+      </div>
+      {editing?(
+        <Picker account={account} current={goal} onSaved={()=>onTouched&&onTouched()} onDone={saved=>{ setEditing(false); if(saved&&onTouched) onTouched(); }}/>
+      ):(
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}>
+          <div style={{minWidth:0,flex:1}}>
+            {has&&<div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"#00cfff",marginBottom:2}}>{goal.section||"—"}</div>}
+            <div title={has?goal.goal:""} style={{fontFamily:"'Exo 2',sans-serif",fontSize:12.5,color:has?"rgba(255,255,255,0.85)":"rgba(255,255,255,0.35)",
+              overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>🎯 {has?goal.goal:"—"}</div>
+            <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:statusColor,marginTop:3}}>{statusText}</div>
+          </div>
+          <div style={{display:"flex",gap:6,flexShrink:0}}>
+            {has&&!checked&&(
+              <button onClick={keep} disabled={busy} style={{padding:"7px 10px",borderRadius:7,border:"1px solid #39ff1455",background:"rgba(57,255,20,0.12)",
+                color:"#39ff14",cursor:busy?"not-allowed":"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>{busy?"…":"✓ Still on this"}</button>
+            )}
+            <button onClick={()=>setEditing(true)} style={{padding:"7px 10px",borderRadius:7,border:"1px solid rgba(255,255,255,0.15)",background:"rgba(255,255,255,0.06)",
+              color:"rgba(255,255,255,0.8)",cursor:"pointer",fontFamily:"'Fira Code',monospace",fontSize:10}}>✏ {has?"Change":"Assign"}</button>
+          </div>
+        </div>
+      )}
+    </Glass>
+  );
+}
+
+// Search the IMPACT curriculum by any word in a project's Build, Explore,
+// Debugging or Quest name (e.g. "cookie", "if/else", "tilemap"), and see
+// which ninjas are saved on that project.
+function CurriculumSearch({goals}){
+  const [q,setQ]=useState("");
+  const words=q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const results=[];
+  if(words.length){
+    for(const [section,belts] of Object.entries(window.CN_CURRICULUM||{})){
+      belts.forEach(b=>b.sets.forEach((set,idx)=>{
+        const hay=[b.belt+" belt","level "+set[0],set[1],set[2],set[3]||"",set[4]].join(" | ").toLowerCase();
+        if(words.every(w=>hay.includes(w))) results.push({section,belt:b.belt,color:b.color,idx,set});
+      }));
+    }
+  }
+  const onProject=(r)=>Object.values(goals||{}).filter(g=>g&&g.section===r.section&&g.belt===r.belt&&Number(g.setIdx)===r.idx);
+  return(
+    <Glass style={{padding:"14px 16px",marginBottom:16}}>
+      <div style={{fontFamily:"'Orbitron',sans-serif",fontSize:11,color:"#00cfff",letterSpacing:1,marginBottom:8}}>📚 FIND A PROJECT</div>
+      <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search a project, explore or debugging topic… (e.g. cookie, while loops, tilemap)"
+        style={{width:"100%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(0,207,255,0.3)",borderRadius:10,
+          padding:"10px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:13,outline:"none"}}/>
+      {words.length>0&&(
+        <div style={{marginTop:10}}>
+          <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.35)",marginBottom:8}}>
+            {results.length} match{results.length===1?"":"es"}{results.length>20?" — showing the first 20":""}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:10}}>
+            {results.slice(0,20).map(r=>{
+              const who=onProject(r);
+              return(
+                <div key={r.section+r.belt+r.idx} style={{padding:"10px 12px",borderRadius:10,background:"rgba(255,255,255,0.04)",
+                  border:"1px solid rgba(255,255,255,0.1)",borderLeft:`4px solid ${r.color}`}}>
+                  <div style={{fontFamily:"'Fira Code',monospace",fontSize:9,color:"rgba(255,255,255,0.45)",marginBottom:4}}>
+                    {r.belt} Belt · Level {r.set[0]}
+                  </div>
+                  {window.CN_GOAL_PARTS.map(part=>r.set[part.col]?(
+                    <div key={part.id} style={{fontFamily:"'Exo 2',sans-serif",fontSize:12,color:"rgba(255,255,255,0.85)",lineHeight:1.5}}>
+                      <span style={{fontFamily:"'Fira Code',monospace",fontSize:9.5,color:part.id==="build"?"#39ff14":part.id==="explore"?"#00cfff":part.id==="debug"?"#ff2d78":"#ffd700"}}>
+                        {part.label}:</span> {r.set[part.col]}
+                    </div>
+                  ):null)}
+                  <div style={{marginTop:6,fontFamily:"'Fira Code',monospace",fontSize:9.5,color:who.length?"#39ff14":"rgba(255,255,255,0.3)"}}>
+                    {who.length?`🥷 On this project: ${who.map(g=>`${g.name} (${(window.CN_GOAL_PARTS.find(x=>x.id===g.part)||{}).label||"?"})`).join(", ")}`:"No ninjas saved on this project"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Glass>
+  );
+}
+
+const FILTERS=[
+  {id:"all",label:"All"},
+  {id:"here",label:"In the dojo"},
+  {id:"check",label:"Needs goal / check"},
+  {id:"none",label:"No goal"},
+];
+
+function NinjasTab(){
+  const [usernames,setUsernames]=useState(null);
+  const [goals,setGoals]=useState({});
+  const [entries,setEntries]=useState([]);
+  const [revocations,setRevocations]=useState({});
+  const [query,setQuery]=useState("");
+  const [filter,setFilterRaw]=useState("all");
+  // Ninjas you just edited stay on screen even if they no longer match the
+  // filter (e.g. assigning a goal under "No goal"), until the filter changes.
+  const [touched,setTouched]=useState(()=>new Set());
+  const setFilter=f=>{ setFilterRaw(f); setTouched(new Set()); };
+  const touch=key=>setTouched(prev=>{ const n=new Set(prev); n.add(key); return n; });
+  const [nowTick,setNowTick]=useState(Date.now());
+
+  useEffect(()=>{
+    const u1=window.fbUsernames.listen(setUsernames);
+    const u2=window.fbGoals.listen(setGoals);
+    const u3=window.fbLeaderboard.listen(setEntries);
+    const u4=window.fbAccessRevocation.listen(setRevocations);
+    const iv=setInterval(()=>setNowTick(Date.now()),30000);
+    return ()=>{u1&&u1();u2&&u2();u3&&u3();u4&&u4();clearInterval(iv);};
+  },[]);
+
+  if(usernames===null) return <div style={{padding:40,fontFamily:"'Fira Code',monospace",color:"rgba(255,255,255,0.4)"}}>Loading ninjas…</div>;
+
+  // Who's signed in right now (same rule as login / In The Dojo / kiosk).
+  const today=window.todayStr();
+  const presentEnds={};
+  window.cnPresenceFromEntries(entries,today).forEach(p=>{
+    if(!p.lastSeen||nowTick>=p.endsAt) return;
+    const acct=window.findLinkedAccount(p.name,usernames);
+    if(!acct) return;
+    const key=window.cnKeySafe(acct);
+    const rv=revocations[key]||revocations[window.cnKeySafe(p.name)];
+    if(rv&&rv.date===today) return;
+    presentEnds[key]=p.endsAt;
+  });
+
+  const rows=[...new Set(usernames)].sort((a,b)=>a.localeCompare(b)).map(account=>{
+    const key=window.cnKeySafe(account);
+    const goal=goals[key]||null;
+    const present=!!presentEnds[key];
+    return {account,key,goal,present,minsLeft:present?Math.max(0,Math.round((presentEnds[key]-nowTick)/60000)):0,
+      has:!!(goal&&goal.goal),checked:window.cnGoalActive(goal)};
+  });
+  const q=query.trim().toLowerCase();
+  const shown=rows.filter(r=>{
+    if(q && !r.account.toLowerCase().includes(q) && !(r.goal&&String(r.goal.goal||"").toLowerCase().includes(q))) return false;
+    if(touched.has(r.key)) return true;
+    if(filter==="here") return r.present;
+    if(filter==="check") return r.present ? !r.checked : !r.has;
+    if(filter==="none") return !r.has;
+    return true;
+  }).sort((a,b)=>(b.present-a.present)||a.account.localeCompare(b.account));
+
+  const counts={
+    total:rows.length, here:rows.filter(r=>r.present).length,
+    needHere:rows.filter(r=>r.present&&!r.checked).length, none:rows.filter(r=>!r.has).length,
+  };
+
+  return(
+    <div style={{padding:"clamp(16px,3vw,28px) clamp(14px,3vw,36px)",animation:"fadeUp .4s ease both"}}>
+      <h2 style={{fontFamily:"'Orbitron',sans-serif",fontSize:"clamp(15px,2vw,22px)",color:"#fff",marginBottom:6}}>🥷 Ninjas</h2>
+      <p style={{fontFamily:"'Fira Code',monospace",fontSize:11,color:"rgba(255,255,255,0.4)",marginBottom:16,lineHeight:1.6}}>
+        Set each ninja's current project — whether they're here or not. It's saved until you change it, shows on In The Dojo,
+        Points and the kiosk, and gets a quick "still on this?" check on each new day they sign in.
+      </p>
+
+      <CurriculumSearch goals={goals}/>
+
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:14}}>
+        {[["NINJAS",counts.total,"#00cfff"],["IN THE DOJO",counts.here,"#39ff14"],["HERE & NEED A GOAL CHECK",counts.needHere,"#ffd700"],["NO GOAL SAVED",counts.none,"#ff2d78"]].map(([l,v,c])=>(
+          <Glass key={l} style={{padding:"10px 14px",minWidth:120}}>
+            <div style={{fontFamily:"'Fira Code',monospace",fontSize:8.5,color:"rgba(255,255,255,0.35)",letterSpacing:1}}>{l}</div>
+            <div style={{fontFamily:"'Orbitron',sans-serif",fontWeight:700,fontSize:20,color:c}}>{v}</div>
+          </Glass>
+        ))}
+      </div>
+
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16,alignItems:"center"}}>
+        <input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Search ninja or project…"
+          style={{flex:"1 1 220px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",borderRadius:10,
+            padding:"10px 14px",color:"#fff",fontFamily:"'Exo 2',sans-serif",fontSize:13,outline:"none"}}/>
+        {FILTERS.map(f=>(
+          <button key={f.id} onClick={()=>setFilter(f.id)} style={{padding:"8px 12px",borderRadius:99,cursor:"pointer",
+            border:`1px solid ${filter===f.id?"#39ff1466":"rgba(255,255,255,0.12)"}`,
+            background:filter===f.id?"rgba(57,255,20,0.12)":"rgba(255,255,255,0.04)",
+            color:filter===f.id?"#39ff14":"rgba(255,255,255,0.55)",fontFamily:"'Fira Code',monospace",fontSize:10}}>{f.label}</button>
+        ))}
+      </div>
+
+      {shown.length===0?(
+        <Glass style={{padding:30,textAlign:"center"}}>
+          <p style={{fontFamily:"'Exo 2',sans-serif",color:"rgba(255,255,255,0.4)",fontSize:13}}>No ninjas match.</p>
+        </Glass>
+      ):(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:12}}>
+          {shown.map(r=><NinjaRow key={r.key} account={r.account} goal={r.goal} present={r.present} minsLeft={r.minsLeft} onTouched={()=>touch(r.key)}/>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NinjasApp(){
+  const {auth} = window.useCnAuth();
+  const isMobile=useIsMobile();
+  useEffect(()=>{
+    if(auth && auth.role!=="admin") window.location.href="home.html"; // Sensei only
+  },[auth]);
+  if(!auth || auth.role!=="admin") return <LoadingScreen status="Loading ninjas..."/>;
+  return(
+    <>
+      <div style={{position:"fixed",inset:0,zIndex:0,pointerEvents:"none",
+        background:"radial-gradient(ellipse 60% 50% at 80% 20%,rgba(57,255,20,0.06) 0%,transparent 70%),radial-gradient(ellipse 50% 40% at 20% 80%,rgba(0,207,255,0.07) 0%,transparent 70%),#060609"}}/>
+      <div style={{display:"flex",flexDirection:isMobile?"column":"row",minHeight:"100vh",position:"relative",zIndex:1,width:"100%"}}>
+        {isMobile
+          ?<MobileNav active="ninjas" isAdmin={true} isStudent={false} studentUsername={auth.username}/>
+          :<Sidebar active="ninjas" isAdmin={true} isStudent={false} studentUsername={auth.username}/>
+        }
+        <div style={{flex:1,overflowY:"auto",...(isMobile?{}:{height:"100vh"})}}>
+          <NinjasTab/>
+        </div>
+      </div>
+      <TourOverlay/>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<NinjasApp/>);
+</script>
+</body>
+</html>
