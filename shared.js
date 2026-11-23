@@ -556,42 +556,60 @@
   // In The Dojo / Points / Ninjas ask a Sensei to keep it or change it.
   //   cnGoalActive(g)    -> goal set/confirmed today (good to go)
   //   cnGoalNeedsCheck(g) -> no goal at all, or a saved goal from an earlier day
+  // Goals live at "ninjaGoals/<accountKey>". (They used to be at "goals/",
+  // but pages left open from before goals were saved between visits still
+  // ran a clean-up that deleted goals there every 5 minutes — the new path is
+  // out of their reach.)
+  const GOALS_PATH = "ninjaGoals";
   window.cnGoalActive = function(g){ return !!(g && g.goal && g.date === window.todayStr()); };
   window.cnGoalNeedsCheck = function(g){ return !window.cnGoalActive(g); };
   window.fbGoals = {
     async getAll(){
-      const snap = await db.ref("goals").once("value");
+      const snap = await db.ref(GOALS_PATH).once("value");
       return snap.val() || {};
     },
     async get(accountKey){
       if(!accountKey) return null;
-      const snap = await db.ref(`goals/${accountKey}`).once("value");
+      const snap = await db.ref(`${GOALS_PATH}/${accountKey}`).once("value");
       return snap.val() || null;
     },
     // extra: optional structured info, e.g. {belt, setIdx, part, project}
     async setGoal(accountKey, name, section, goal, extra){
-      await db.ref(`goals/${accountKey}`).set(Object.assign({
+      await db.ref(`${GOALS_PATH}/${accountKey}`).set(Object.assign({
         name: name || "", section: section || "", goal: goal || "", date: window.todayStr(), updatedAt: Date.now()
       }, extra || {}));
     },
     // "Still on this" — keeps the saved goal and marks it checked for today.
     async confirm(accountKey){
       if(!accountKey) return;
-      await db.ref(`goals/${accountKey}`).update({date: window.todayStr(), confirmedAt: Date.now()});
+      await db.ref(`${GOALS_PATH}/${accountKey}`).update({date: window.todayStr(), confirmedAt: Date.now()});
     },
     async clearGoal(accountKey){
       if(!accountKey) return;
-      await db.ref(`goals/${accountKey}`).remove();
+      await db.ref(`${GOALS_PATH}/${accountKey}`).remove();
     },
     // Realtime listener — fires immediately on any change, from any window.
     // Passes every saved goal; use cnGoalActive / cnGoalNeedsCheck on each.
     listen(callback){
-      const ref = db.ref("goals");
+      const ref = db.ref(GOALS_PATH);
       const handler = snap => callback(snap.val() || {});
       ref.on("value", handler);
       return () => ref.off("value", handler);
     }
   };
+
+  // Copy any goals still at the old "goals/" path over to the new one, once
+  // per page load. Only fills in ninjas that don't have a goal at the new path
+  // yet, so it never overwrites anything a Sensei has set since.
+  (async function migrateGoals(){
+    try{
+      const [oldSnap, newSnap] = await Promise.all([db.ref("goals").once("value"), db.ref(GOALS_PATH).once("value")]);
+      const oldG = oldSnap.val() || {}, newG = newSnap.val() || {};
+      const missing = {};
+      for(const [k, g] of Object.entries(oldG)) if(g && g.goal && !newG[k]) missing[k] = g;
+      if(Object.keys(missing).length) await db.ref(GOALS_PATH).update(missing);
+    }catch(e){ /* offline or no access — nothing to migrate */ }
+  })();
 
   // Shared goal picker (plain React.createElement, no JSX) used by the
   // Ninjas tab, In The Dojo and Points so every place sets goals the same
